@@ -1,0 +1,255 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: var(--clr-primary);
+  --color-primary-dim: var(--clr-primary-dim);
+  --color-primary-fixed: var(--clr-primary-fixed);
+  --color-primary-fixed-dim: var(--clr-primary-fixed-dim, #8885ff);
+  --color-primary-container: var(--clr-primary-container);
+  --color-on-primary: var(--clr-on-primary);
+  --color-on-primary-container: var(--clr-on-primary-container);
+  --color-on-primary-fixed: var(--clr-on-primary-fixed, #000000);
+  --color-on-primary-fixed-variant: var(--clr-on-primary-fixed-variant, #1a0099);
+
+  --color-secondary: var(--clr-secondary);
+  --color-secondary-dim: var(--clr-secondary-dim);
+  --color-secondary-container: var(--clr-secondary-container);
+  --color-secondary-fixed: var(--clr-secondary-fixed, #a4d8ff);
+  --color-secondary-fixed-dim: var(--clr-secondary-fixed-dim, #81ccff);
+  --color-on-secondary: var(--clr-on-secondary);
+  --color-on-secondary-container: var(--clr-on-secondary-container);
+  --color-on-secondary-fixed: var(--clr-on-secondary-fixed, #003853);
+  --color-on-secondary-fixed-variant: var(--clr-on-secondary-fixed-variant, #00567c);
+
+  --color-tertiary: var(--clr-tertiary);
+  --color-tertiary-dim: var(--clr-tertiary-dim, #005c3d);
+  --color-tertiary-container: var(--clr-tertiary-container);
+  --color-tertiary-fixed: var(--clr-tertiary-fixed, #69f6b8);
+  --color-tertiary-fixed-dim: var(--clr-tertiary-fixed-dim, #58e7ab);
+  --color-on-tertiary: var(--clr-on-tertiary);
+  --color-on-tertiary-container: var(--clr-on-tertiary-container);
+  --color-on-tertiary-fixed: var(--clr-on-tertiary-fixed, #00452d);
+  --color-on-tertiary-fixed-variant: var(--clr-on-tertiary-fixed-variant, #006544);
+
+  --color-error: var(--clr-error);
+  --color-error-dim: var(--clr-error-dim, #a70138);
+  --color-error-container: var(--clr-error-container);
+  --color-on-error: var(--clr-on-error);
+  --color-on-error-container: var(--clr-on-error-container);
+
+  --color-surface: var(--clr-surface);
+  --color-surface-bright: var(--clr-surface-bright);
+  --color-surface-dim: var(--clr-surface-dim);
+  --color-surface-variant: var(--clr-surface-variant);
+  --color-surface-tint: var(--clr-surface-tint, #4a40e0);
+  --color-surface-container: var(--clr-surface-container);
+  --color-surface-container-low: var(--clr-surface-container-low);
+  --color-surface-container-high: var(--clr-surface-container-high);
+  --color-surface-container-highest: var(--clr-surface-container-highest);
+  --color-surface-container-lowest: var(--clr-surface-container-lowest);
+  --color-on-surface: var(--clr-on-surface);
+  --color-on-surface-variant: var(--clr-on-surface-variant);
+
+  --color-background: var(--clr-background);
+  --color-on-background: var(--clr-on-background);
+
+  --color-outline: var(--clr-outline);
+  --color-outline-variant: var(--clr-outline-variant);
+
+  --color-inverse-surface: var(--clr-inverse-surface);
+  --color-inverse-primary: var(--clr-inverse-primary);
+  --color-inverse-on-surface: var(--clr-inverse-on-surface);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* ── Light Mode Tokens ── */
+:root {
+  --clr-primary: #4a40e0;
+  --clr-primary-dim: #3d30d4;
+  --clr-primary-fixed: #9795ff;
+  --clr-primary-container: #9795ff;
+  --clr-on-primary: #f4f1ff;
+  --clr-on-primary-container: #14007e;
+  --clr-secondary: #00628c;
+  --clr-secondary-dim: #00557b;
+  --clr-secondary-container: #a4d8ff;
+  --clr-on-secondary: #e9f4ff;
+  --clr-on-secondary-container: #004c6f;
+  --clr-surface: #f4f6ff;
+  --clr-surface-bright: #f4f6ff;
+  --clr-surface-dim: #bdd6fc;
+  --clr-surface-container: #dce9ff;
+  --clr-surface-container-low: #eaf1ff;
+  --clr-surface-container-high: #d2e4ff;
+  --clr-surface-container-highest: #c9deff;
+  --clr-surface-container-lowest: #ffffff;
+  --clr-surface-variant: #c9deff;
+  --clr-background: #f4f6ff;
+  --clr-on-surface: #203044;
+  --clr-on-surface-variant: #4d5d73;
+  --clr-on-background: #203044;
+  --clr-outline: #68788f;
+  --clr-outline-variant: #9eaec7;
+  --clr-inverse-surface: #000f21;
+  --clr-inverse-primary: #8582ff;
+  --clr-inverse-on-surface: #8e9eb7;
+  --clr-error: #b41340;
+  --clr-on-error: #ffefef;
+  --clr-error-container: #f74b6d;
+  --clr-on-error-container: #510017;
+  --clr-tertiary: #006947;
+  --clr-tertiary-container: #69f6b8;
+  --clr-on-tertiary: #c8ffe0;
+  --clr-on-tertiary-container: #005a3c;
+
+  /* Legacy aliases for inner pages */
+  --primary: #4a40e0;
+  --primary-container: #7c6fff;
+  --primary-fixed-dim: #3a30c0;
+  --on-primary: #ffffff;
+  --secondary: #00628c;
+  --tertiary: #1b9e5a;
+  --tertiary-container: #c8f7d5;
+  --on-tertiary-container: #0a5c30;
+  --error: #c73434;
+  --surface: #f4f6ff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #eaf1ff;
+  --surface-container: #dce9ff;
+  --on-surface: #203044;
+  --on-surface-variant: #4d5d73;
+  --outline-variant: rgba(122, 139, 160, 0.2);
+  --shadow-ambient: 0 20px 40px rgba(32, 48, 68, 0.06);
+  --shadow-elevated: 0 12px 32px rgba(32, 48, 68, 0.10);
+  --shadow-subtle: 0 4px 16px rgba(32, 48, 68, 0.04);
+  --radius-card: 1rem;
+  --radius-container: 3rem;
+  --radius-pill: 3rem;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body-legacy: 'Be Vietnam Pro', sans-serif;
+}
+
+/* ── Dark Mode Tokens ── */
+.dark {
+  --clr-primary: #8582ff;
+  --clr-primary-dim: #6c6aff;
+  --clr-primary-fixed: #4a40e0;
+  --clr-primary-container: #2d24b8;
+  --clr-on-primary: #ffffff;
+  --clr-on-primary-container: #c8c6ff;
+  --clr-secondary: #81ccff;
+  --clr-secondary-dim: #5ab8f0;
+  --clr-secondary-container: #004e6f;
+  --clr-on-secondary: #001e2e;
+  --clr-on-secondary-container: #a4d8ff;
+  --clr-surface: #0d1b2e;
+  --clr-surface-bright: #1a2a40;
+  --clr-surface-dim: #070f1c;
+  --clr-surface-container: #152030;
+  --clr-surface-container-low: #111929;
+  --clr-surface-container-high: #1e2d42;
+  --clr-surface-container-highest: #253549;
+  --clr-surface-container-lowest: #060e1a;
+  --clr-surface-variant: #1e2d42;
+  --clr-background: #0d1b2e;
+  --clr-on-surface: #cfdeff;
+  --clr-on-surface-variant: #9eaec7;
+  --clr-on-background: #cfdeff;
+  --clr-outline: #68788f;
+  --clr-outline-variant: #2d3d52;
+  --clr-inverse-surface: #cfdeff;
+  --clr-inverse-primary: #4a40e0;
+  --clr-inverse-on-surface: #203044;
+  --clr-error: #ff6b8a;
+  --clr-on-error: #3a000f;
+  --clr-error-container: #7a0026;
+  --clr-on-error-container: #ffc0cc;
+  --clr-tertiary: #58e7ab;
+  --clr-tertiary-container: #004d33;
+  --clr-on-tertiary: #003322;
+  --clr-on-tertiary-container: #69f6b8;
+}
+
+/* ── Themed Utility Classes ── */
+.bg-surface { background-color: var(--clr-surface) !important; }
+.bg-surface-variant { background-color: var(--clr-surface-variant) !important; }
+.bg-surface-container { background-color: var(--clr-surface-container) !important; }
+.bg-surface-container-high { background-color: var(--clr-surface-container-high) !important; }
+.text-on-surface { color: var(--clr-on-surface) !important; }
+.text-on-surface-variant { color: var(--clr-on-surface-variant) !important; }
+.text-primary { color: var(--clr-primary) !important; }
+.text-on-primary { color: var(--clr-on-primary) !important; }
+.text-secondary { color: var(--clr-secondary) !important; }
+.border-outline-variant { border-color: var(--clr-outline-variant) !important; }
+
+.card-primary { background: linear-gradient(135deg, var(--clr-primary), var(--clr-primary-dim)); }
+.card-secondary { background: linear-gradient(135deg, var(--clr-secondary), var(--clr-secondary-dim)); }
+.blob-primary { background-color: color-mix(in srgb, var(--clr-primary-container) 20%, transparent); }
+.blob-secondary { background-color: color-mix(in srgb, var(--clr-secondary-container) 20%, transparent); }
+
+::selection {
+  background-color: var(--clr-primary-container);
+  color: var(--clr-on-primary-container);
+}
+
+.font-headline { font-family: 'Plus Jakarta Sans', sans-serif; }
+.font-body { font-family: 'Be Vietnam Pro', sans-serif; }
+
+/* ── Global Styles ── */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: 'Be Vietnam Pro', sans-serif;
+  background-color: var(--clr-background);
+  color: var(--clr-on-surface);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+button, input, select, textarea { font: inherit; }
+a { color: inherit; text-decoration: none; }
+#root { min-height: 100vh; }
+
+header, main, footer, button, .card-primary, .card-secondary {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* ── Typography (inner pages) ── */
+.headline-lg {
+  font-family: var(--font-display);
+  font-size: 2rem; font-weight: 700;
+  letter-spacing: -0.02em; line-height: 1.2;
+  color: var(--on-surface);
+}
+.headline-md {
+  font-family: var(--font-display);
+  font-size: 1.5rem; font-weight: 700;
+  letter-spacing: -0.02em; line-height: 1.25;
+  color: var(--on-surface);
+}
+.title-md {
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 1.125rem; font-weight: 600;
+  line-height: 1.3; color: var(--on-surface);
+}
+.body-md {
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 0.875rem; font-weight: 400;
+  line-height: 1.6; color: var(--on-surface-variant);
+}
+.label-md {
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 0.75rem; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
