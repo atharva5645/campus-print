@@ -1,4 +1,5 @@
 import supabase from '../config/supabaseClient.js'
+import { createNotifications } from '../lib/notificationStore.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { createHttpError } from '../utils/httpError.js'
 
@@ -31,6 +32,87 @@ async function ensureProfileExists(userId, studentName = null) {
   if (insertError) {
     throw createHttpError(500, 'Failed to create user profile', insertError)
   }
+}
+
+async function getProfileLabel(userId) {
+  if (!userId) {
+    return 'A student'
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('full_name, email')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (error) {
+    throw createHttpError(500, 'Failed to load order profile context', error)
+  }
+
+  return data?.full_name || data?.email || 'A student'
+}
+
+function buildOrderSummary({ quantity, serviceName, pages }) {
+  const quantityLabel = `${quantity} ${serviceName}${quantity > 1 ? ' sets' : ''}`
+  const pageLabel = pages > 1 ? `${pages} pages each` : '1 page'
+  return `${quantityLabel} (${pageLabel})`
+}
+
+async function createOrderNotifications({ order, serviceName, studentLabel }) {
+  const summary = buildOrderSummary({
+    quantity: Number(order.quantity),
+    serviceName,
+    pages: Number(order.pages),
+  })
+
+  await createNotifications([
+    {
+      audience: 'student',
+      user_id: order.user_id,
+      order_id: order.id,
+      type: 'order_created',
+      title: 'Your order is getting ready',
+      message: `Your order for ${summary} has been received and is getting ready.`,
+    },
+    {
+      audience: 'admin',
+      order_id: order.id,
+      type: 'admin_order_created',
+      title: 'New print order received',
+      message: `${studentLabel} ordered ${summary}.`,
+    },
+  ])
+}
+
+async function createStatusNotification({ order, serviceName }) {
+  if (!order.user_id) {
+    return
+  }
+
+  const summary = buildOrderSummary({
+    quantity: Number(order.quantity),
+    serviceName,
+    pages: Number(order.pages),
+  })
+
+  const statusMessages = {
+    pending: `Your order for ${summary} has been queued.`,
+    in_review: `Your order for ${summary} is now under review.`,
+    processing: `Your order for ${summary} is getting ready.`,
+    completed: `Your order for ${summary} is ready for pickup.`,
+    cancelled: `Your order for ${summary} was cancelled. Please contact the print room if needed.`,
+  }
+
+  await createNotifications([
+    {
+      audience: 'student',
+      user_id: order.user_id,
+      order_id: order.id,
+      type: 'order_status',
+      title: 'Order status updated',
+      message: statusMessages[order.status] || `Your order for ${summary} was updated.`,
+    },
+  ])
 }
 
 export const getOrders = asyncHandler(async (req, res) => {
@@ -79,9 +161,27 @@ export const createOrder = asyncHandler(async (req, res) => {
     status: 'pending',
   }
 
-  const { data, error } = await supabase.from('orders').insert(payload).select().single()
+  const { data, error } = await supabase
+    .from('orders')
+    .insert(payload)
+    .select(`
+      *,
+      services(name)
+    `)
+    .single()
 
   if (error) throw createHttpError(500, 'Failed to create order', error)
+
+  const serviceName = data.services?.name || 'printing order'
+  const studentLabel = student_name || (await getProfileLabel(user_id))
+
+  createOrderNotifications({
+    order: data,
+    serviceName,
+    studentLabel,
+  }).catch((notificationError) => {
+    console.warn('Failed to create order notifications', notificationError)
+  })
 
   res.status(201).json(data)
 })
@@ -98,10 +198,20 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     .from('orders')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
-    .select()
+    .select(`
+      *,
+      services(name)
+    `)
     .single()
 
   if (error) throw createHttpError(500, 'Failed to update order status', error)
+
+  createStatusNotification({
+    order: data,
+    serviceName: data.services?.name || 'printing order',
+  }).catch((notificationError) => {
+    console.warn('Failed to create order status notification', notificationError)
+  })
 
   res.json(data)
 })

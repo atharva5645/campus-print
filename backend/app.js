@@ -6,6 +6,7 @@ import express from 'express'
 import adminRoutes from './routes/adminRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import cartRoutes from './routes/cartRoutes.js'
+import notificationRoutes from './routes/notificationRoutes.js'
 import orderRoutes from './routes/orderRoutes.js'
 import serviceRoutes from './routes/serviceRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js'
@@ -45,6 +46,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/services', serviceRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/cart', cartRoutes)
+app.use('/api/notifications', notificationRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/uploads', uploadRoutes)

@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { ArrowLeft, Bell, BookOpenText, CircleHelp, LogOut, MoonStar, SunMedium } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
 import { signOut } from '../lib/auth'
+import { getStudentProfile, saveStudentProfile } from '../lib/studentProfile'
+import { supabase } from '../lib/supabase'
 
 function Toggle({ checked, onChange }) {
   return (
@@ -37,10 +39,27 @@ function SettingRow({ icon: Icon, title, subtitle, action = null, onClick, click
   )
 }
 
+function getUserFallbackName(user) {
+  if (!user) return 'Student'
+
+  const metadata = user.user_metadata || {}
+  const identityData = user.identities?.[0]?.identity_data || {}
+  return (
+    metadata.full_name ||
+    metadata.name ||
+    identityData.full_name ||
+    identityData.name ||
+    (user.email ? user.email.split('@')[0] : 'Student')
+  )
+}
+
 function SettingsPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
+  const [currentUser, setCurrentUser] = useState(null)
+  const [profile, setProfile] = useState(() => getStudentProfile())
+  const [profileSavedMessage, setProfileSavedMessage] = useState('')
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('theme')
     if (saved) return saved === 'dark'
@@ -60,6 +79,29 @@ function SettingsPage() {
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
 
+  useEffect(() => {
+    async function loadCurrentUser() {
+      try {
+        const { data } = await supabase.auth.getUser()
+        const user = data.user || null
+        setCurrentUser(user)
+
+        if (user) {
+          const metadata = user.user_metadata || {}
+          setProfile((current) => ({
+            name: current.name || getUserFallbackName(user),
+            usn: current.usn || '',
+            department: current.department || metadata.department || metadata.dept || '',
+          }))
+        }
+      } catch {
+        setCurrentUser(null)
+      }
+    }
+
+    loadCurrentUser()
+  }, [])
+
   const returnPath = location.state?.from || '/home'
   const returnLabel = returnPath === '/admin' ? 'Back to Admin' : 'Back to Home'
 
@@ -75,9 +117,26 @@ function SettingsPage() {
     }
   }
 
+  function handleProfileChange(field, value) {
+    setProfile((current) => ({
+      ...current,
+      [field]: value,
+    }))
+    setProfileSavedMessage('')
+  }
+
+  function handleSaveProfile() {
+    saveStudentProfile(profile)
+    setProfileSavedMessage('Student profile updated successfully.')
+  }
+
+  const profileName = profile.name || getUserFallbackName(currentUser)
+  const profileDepartment = profile.department || 'Department not added yet'
+  const profileUsn = profile.usn || 'USN not added yet'
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(151,149,255,0.18),_transparent_32%),_var(--clr-surface)] font-body text-on-surface antialiased">
-      <header className="sticky top-0 z-40 border-b border-white/20 bg-white/85 backdrop-blur-xl">
+      <header className="glass-header sticky top-0 z-40">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex items-center gap-4">
             <button
@@ -88,8 +147,8 @@ function SettingsPage() {
               <ArrowLeft size={20} strokeWidth={2.2} />
             </button>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">Settings</p>
-              <h1 className="font-headline text-[2rem] font-extrabold tracking-tight text-on-surface">Preferences</h1>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">Student Profile</p>
+              <h1 className="font-headline text-[2rem] font-extrabold tracking-tight text-on-surface">Profile & Preferences</h1>
             </div>
           </div>
           <button
@@ -104,24 +163,94 @@ function SettingsPage() {
 
       <main className="mx-auto max-w-6xl px-4 pb-32 pt-6 sm:px-6">
         <section className="overflow-hidden rounded-[2rem] border border-white/30 bg-gradient-to-r from-primary to-indigo-500 p-6 text-white shadow-[0_24px_48px_rgba(74,64,224,0.20)]">
-          <p className="text-[11px] uppercase tracking-[0.24em] text-white/70">Settings</p>
+          <p className="text-[11px] uppercase tracking-[0.24em] text-white/70">Student Profile</p>
           <div className="mt-3 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="font-headline text-3xl font-extrabold">Manage your CampusPrint app</h2>
+              <h2 className="font-headline text-3xl font-extrabold">Manage your CampusPrint identity</h2>
               <p className="mt-2 max-w-2xl text-sm text-white/80">
-                Keep the student app simple: switch appearance, review how the flow works, and sign out whenever you need.
+                Update your name, USN, and department so your student dashboard feels personal and your orders stay easier to recognize.
               </p>
             </div>
             <div className="rounded-[1.5rem] bg-white/12 px-5 py-4 backdrop-blur-md">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/65">Current mode</p>
-              <p className="mt-2 font-headline text-lg font-bold">Alex</p>
-              <p className="text-sm text-white/80">Student dashboard</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/65">Current student</p>
+              <p className="mt-2 font-headline text-lg font-bold">{profileName}</p>
+              <p className="text-sm text-white/80">{profileDepartment}</p>
+              <p className="mt-1 text-sm text-white/70">{profileUsn}</p>
             </div>
           </div>
         </section>
 
         <section className="mt-8 grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-8">
+            <div>
+              <div className="mb-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">Profile</p>
+                <h2 className="font-headline text-2xl font-bold text-on-surface">Student details</h2>
+              </div>
+              <div className="space-y-4 rounded-[1.35rem] bg-surface-container-lowest p-5 shadow-[0_10px_30px_rgba(32,48,68,0.05)]">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-on-surface" htmlFor="student-name">
+                    Change your name
+                  </label>
+                  <input
+                    id="student-name"
+                    type="text"
+                    value={profile.name}
+                    onChange={(event) => handleProfileChange('name', event.target.value)}
+                    placeholder="Enter your full name"
+                    className="w-full rounded-2xl border border-outline-variant/20 bg-surface-container-low px-4 py-3 text-on-surface outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-on-surface" htmlFor="student-usn">
+                      USN number
+                    </label>
+                    <input
+                      id="student-usn"
+                      type="text"
+                      value={profile.usn}
+                      onChange={(event) => handleProfileChange('usn', event.target.value.toUpperCase())}
+                      placeholder="Enter your USN"
+                      className="w-full rounded-2xl border border-outline-variant/20 bg-surface-container-low px-4 py-3 text-on-surface outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-on-surface" htmlFor="student-department">
+                      Department name
+                    </label>
+                    <input
+                      id="student-department"
+                      type="text"
+                      value={profile.department}
+                      onChange={(event) => handleProfileChange('department', event.target.value)}
+                      placeholder="Enter your department"
+                      className="w-full rounded-2xl border border-outline-variant/20 bg-surface-container-low px-4 py-3 text-on-surface outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-surface-container-low p-4 text-sm text-on-surface-variant">
+                  <p><span className="font-semibold text-on-surface">Name:</span> {profileName}</p>
+                  <p className="mt-2"><span className="font-semibold text-on-surface">USN:</span> {profileUsn}</p>
+                  <p className="mt-2"><span className="font-semibold text-on-surface">Department:</span> {profileDepartment}</p>
+                  <p className="mt-2"><span className="font-semibold text-on-surface">Email:</span> {currentUser?.email || 'Not available'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveProfile}
+                  className="flex w-full items-center justify-center gap-3 rounded-2xl bg-primary px-5 py-4 font-headline font-bold text-white shadow-[0_10px_20px_rgba(74,64,224,0.25)] transition active:scale-95"
+                >
+                  <span className="material-symbols-outlined">save</span>
+                  Save profile
+                </button>
+                {profileSavedMessage && (
+                  <div className="rounded-2xl bg-tertiary-container/25 p-4 text-sm text-on-tertiary-container">
+                    {profileSavedMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div>
               <div className="mb-4">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">Preferences</p>
@@ -204,7 +333,7 @@ function SettingsPage() {
                 </div>
               </div>
               <div className="mt-5 space-y-3 text-sm text-on-surface-variant">
-                <p>The light and dark mode switch applies immediately and saves the choice in your browser.</p>
+                <p>Your saved student profile is stored on this device and is used across the student dashboard.</p>
                 <p>Logout takes you back to the first screen so you can choose student or admin mode again.</p>
               </div>
             </div>

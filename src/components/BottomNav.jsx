@@ -10,14 +10,7 @@ const items = [
 
 function BottomNav() {
   return (
-    <nav
-      className="sticky bottom-0 z-20 px-3 py-3"
-      style={{
-        background: 'rgba(255,255,255,0.85)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-      }}
-    >
+    <nav className="glass-surface sticky bottom-0 z-20 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
       <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
         {items.map((item) => {
           const Icon = item.icon
@@ -26,19 +19,12 @@ function BottomNav() {
             <NavLink
               key={item.to}
               to={item.to}
-              className="flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs font-medium transition-all duration-200"
-              style={({ isActive }) =>
-                isActive
-                  ? {
-                      background:
-                        'linear-gradient(135deg, var(--primary), var(--primary-container))',
-                      color: 'var(--on-primary)',
-                      boxShadow: '0 6px 20px rgba(74, 64, 224, 0.28)',
-                    }
-                  : {
-                      color: 'var(--on-surface-variant)',
-                      background: 'transparent',
-                    }
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs font-medium transition-all duration-200 ${
+                  isActive
+                    ? 'bg-gradient-to-br from-primary to-primary-dim text-white shadow-[0_6px_20px_rgba(74,64,224,0.28)]'
+                    : 'text-on-surface-variant hover:bg-surface-container-high'
+                }`
               }
             >
               <Icon size={18} strokeWidth={1.5} />

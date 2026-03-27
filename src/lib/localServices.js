@@ -39,6 +39,22 @@ function canUseStorage() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
 }
 
+function normalizeServices(services) {
+  if (!Array.isArray(services) || services.length === 0) {
+    return defaultServices
+  }
+
+  return services.map((service) => ({
+    ...service,
+    background: service.background || service.bg || '#eef2ff',
+    color: service.color || '#4a40e0',
+  }))
+}
+
+function hasEnabledService(services) {
+  return services.some((service) => service.enabled)
+}
+
 export function getLocalServices() {
   if (!canUseStorage()) {
     return defaultServices
@@ -52,7 +68,7 @@ export function getLocalServices() {
 
   try {
     const parsed = JSON.parse(saved)
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultServices
+    return Array.isArray(parsed) && parsed.length > 0 ? normalizeServices(parsed) : defaultServices
   } catch {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultServices))
     return defaultServices
@@ -61,17 +77,24 @@ export function getLocalServices() {
 
 export function saveLocalServices(services) {
   if (!canUseStorage()) return
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(services))
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeServices(services)))
 }
 
 export function syncLocalServices(services) {
   if (!Array.isArray(services) || services.length === 0) return
 
-  const normalized = services.map((service) => ({
-    ...service,
-    background: service.background || service.bg || '#eef2ff',
-    color: service.color || '#4a40e0',
-  }))
+  const normalized = normalizeServices(services)
 
   saveLocalServices(normalized)
+}
+
+export function getStudentSafeServices(candidateServices = null) {
+  const normalized = candidateServices ? normalizeServices(candidateServices) : getLocalServices()
+
+  if (hasEnabledService(normalized)) {
+    return normalized
+  }
+
+  saveLocalServices(defaultServices)
+  return defaultServices
 }

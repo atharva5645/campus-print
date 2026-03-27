@@ -74,6 +74,18 @@ create table if not exists public.admin_alerts (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  audience text not null check (audience in ('student', 'admin')),
+  user_id uuid references public.profiles(id) on delete cascade,
+  order_id uuid references public.orders(id) on delete cascade,
+  type text not null default 'info',
+  title text not null,
+  message text not null,
+  is_read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -130,3 +142,14 @@ insert into public.admin_alerts (title, description, severity, resolved)
 values
   ('Low toner warning', 'Black toner is approaching reorder level.', 'medium', false),
   ('Laminator maintenance', 'Main laminator requires service review.', 'high', false);
+
+create table if not exists public.documents (
+  id uuid primary key default gen_random_uuid(),
+  service_id uuid not null references public.services(id) on delete cascade,
+  title text not null,
+  file_url text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists documents_service_id_idx on public.documents(service_id);
+create index if not exists documents_created_at_idx on public.documents(created_at desc);

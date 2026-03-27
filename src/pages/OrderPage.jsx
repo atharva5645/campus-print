@@ -3,41 +3,93 @@ import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
 import CartSummary from '../components/CartSummary'
+import NotificationBell from '../components/NotificationBell'
 import OrderForm from '../components/OrderForm'
 import { getServices } from '../api/adminApi'
 import { addCartItem } from '../api/cartApi'
 import { uploadOrderFile } from '../api/uploadApi'
-import { getLocalServices, syncLocalServices } from '../lib/localServices'
+import { addLocalCartItem } from '../lib/localCart'
+import { getLocalServices, getStudentSafeServices, syncLocalServices } from '../lib/localServices'
 import { supabase } from '../lib/supabase'
 
 const PRICE_PER_PAGE = 2.5
-const placeholderFiles = [
-  {
-    name: 'assignment_final.pdf',
-    meta: '1.2 MB - Ready',
-    type: 'pdf',
-  },
-  {
-    name: 'report_v1.jpg',
-    meta: '840 KB - Ready',
-    type: 'image',
-    thumbnail:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuBgiT5g4VgQV6MdCQ-9KKQatR530sh18s_lkzihkoY1CpsaZRVyfoxmGog8EFYul-WBIhEVdYQFfDMugz41W6QlpASXA03SCCGh4HeyFcBfXYgDhLrBKzdss28UXPxitsLsSCavtJlhpxgMrqJC4YxbOpne4pP_OS-FDgyra5OaafM_pfJJFLFb-GYsTRr6qLP55xbMbZNXLBsaBbTMyRKNoHwwqh9_mkO464E1poSZEBPoTh4e1Tcmaytl1r3ep4ci0vhG7R9RisI',
-  },
-]
+const PRINT_MODE_PRICING = {
+  bw: 1.5,
+  color: 2.5,
+}
+
+const PAPER_SIZE_MULTIPLIER = {
+  A4: 1,
+  Legal: 1.2,
+  A3: 1.8,
+}
+
+const FINISHING_PRICE = {
+  none: 0,
+  staple: 10,
+  spiral: 35,
+  lamination: 20,
+}
+
+function buildLocalUploadPreview(file) {
+  return {
+    name: file.name,
+    meta: `${(file.size / (1024 * 1024)).toFixed(1)} MB - Ready in prototype mode`,
+    type: file.type.startsWith('image/') ? 'image' : 'pdf',
+    thumbnail: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+    publicUrl: undefined,
+  }
+}
+
+function revokePreviewUrl(file) {
+  if (file?.thumbnail && typeof file.thumbnail === 'string' && file.thumbnail.startsWith('blob:')) {
+    URL.revokeObjectURL(file.thumbnail)
+  }
+}
+
+function getFinishingLabel(finishingOption, finishingPrice) {
+  const labels = {
+    none: 'None',
+    staple: 'Staple',
+    spiral: 'Spiral Bind',
+    lamination: 'Lamination',
+  }
+
+  const baseLabel = labels[finishingOption] || finishingOption
+  if (!finishingPrice || finishingOption === 'none') {
+    return baseLabel
+  }
+
+  return `${baseLabel} (+Rs ${finishingPrice})`
+}
 
 function OrderPage() {
   const navigate = useNavigate()
   const [quantity, setQuantity] = useState(1)
   const [pages, setPages] = useState(50)
+  const [printMode, setPrintMode] = useState('color')
+  const [printSides, setPrintSides] = useState('single')
+  const [paperSize, setPaperSize] = useState('A4')
+  const [finishing, setFinishing] = useState('none')
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [pageError, setPageError] = useState('')
-  const [uploadedFiles, setUploadedFiles] = useState(placeholderFiles)
+  const [uploadedFiles, setUploadedFiles] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
 
-  const totalPrice = useMemo(() => quantity * pages * PRICE_PER_PAGE, [pages, quantity])
+  const pricePerPage = useMemo(() => {
+    const basePrice = PRINT_MODE_PRICING[printMode] || PRICE_PER_PAGE
+    const multiplier = PAPER_SIZE_MULTIPLIER[paperSize] || 1
+    return Number((basePrice * multiplier).toFixed(2))
+  }, [paperSize, printMode])
+
+  const finishingCharge = FINISHING_PRICE[finishing] || 0
+
+  const totalPrice = useMemo(
+    () => Number((quantity * pages * pricePerPage + finishingCharge * quantity).toFixed(2)),
+    [finishingCharge, pages, pricePerPage, quantity]
+  )
 
   useEffect(() => {
     async function ensureAuthenticated() {
@@ -59,28 +111,35 @@ function OrderPage() {
 
         const services = await getServices()
         syncLocalServices(services)
+        const studentServices = getStudentSafeServices(services)
         const preferredService =
-          services.find((service) => service.name === 'Color Printing') ||
-          services.find((service) => service.enabled) ||
-          services[0] ||
+          studentServices.find((service) => service.name === 'Color Printing' && service.enabled) ||
+          studentServices.find((service) => service.enabled) ||
+          studentServices[0] ||
           null
 
         setSelectedService(preferredService)
         setPageError('')
-      } catch (error) {
-        const localServices = getLocalServices()
+      } catch {
+        const localServices = getStudentSafeServices(getLocalServices())
         const preferredService =
           localServices.find((service) => service.name === 'Color Printing' && service.enabled) ||
           localServices.find((service) => service.enabled) ||
           null
 
         setSelectedService(preferredService)
-        setPageError('Using locally saved services for now. Admin changes on this device will still appear here.')
+        setPageError('Using locally saved prototype services for now.')
       }
     }
 
     loadServices()
   }, [navigate])
+
+  useEffect(() => {
+    return () => {
+      uploadedFiles.forEach(revokePreviewUrl)
+    }
+  }, [uploadedFiles])
 
   const handleAddToCart = async () => {
     if (!selectedService?.id) {
@@ -97,14 +156,43 @@ function OrderPage() {
         return
       }
 
-      await addCartItem({
-        user_id: data.user.id,
-        service_id: selectedService.id,
+      const localCartItem = {
+        id: `local-${Date.now()}`,
+        serviceId: selectedService.id,
+        serviceName: selectedService.name,
         pages,
         quantity,
-        price_per_page: PRICE_PER_PAGE,
-      })
-      setPageError('')
+        pricePerPage,
+        totalPrice,
+        printMode,
+        printSides,
+        paperSize,
+        finishing,
+        finishingCharge,
+        uploadedFiles: uploadedFiles.map((file) => ({
+          name: file.name,
+          type: file.type,
+          publicUrl: file.publicUrl || '',
+        })),
+      }
+
+      addLocalCartItem(localCartItem)
+
+      let apiWarning = ''
+
+      try {
+        await addCartItem({
+          user_id: data.user.id,
+          service_id: selectedService.id,
+          pages,
+          quantity,
+          price_per_page: pricePerPage,
+        })
+      } catch {
+        apiWarning = 'Added to cart in prototype mode. Backend sync is unavailable right now.'
+      }
+
+      setPageError(apiWarning)
       navigate('/cart')
     } catch (error) {
       setPageError(error.message)
@@ -132,17 +220,29 @@ function OrderPage() {
         ...current,
       ])
       setPageError('')
-    } catch (error) {
-      setPageError(error.message)
+    } catch {
+      setUploadedFiles((current) => [
+        buildLocalUploadPreview(file),
+        ...current,
+      ])
+      setPageError('File added in prototype mode. Backend upload is unavailable right now.')
     } finally {
       setIsUploading(false)
       event.target.value = ''
     }
   }
 
+  const handleRemoveFile = (indexToRemove) => {
+    setUploadedFiles((current) => {
+      const fileToRemove = current[indexToRemove]
+      revokePreviewUrl(fileToRemove)
+      return current.filter((_, index) => index !== indexToRemove)
+    })
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(151,149,255,0.18),_transparent_34%),_var(--clr-surface)] font-body text-on-surface antialiased">
-      <header className="sticky top-0 z-40 border-b border-white/20 bg-gradient-to-r from-indigo-600 via-indigo-500 to-sky-500 shadow-[0_16px_36px_rgba(32,48,68,0.12)] backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-white/20 bg-gradient-to-r from-[var(--clr-primary)] via-[var(--clr-primary-dim)] to-[var(--clr-secondary)] shadow-[0_16px_36px_rgba(32,48,68,0.12)] backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <button
@@ -162,6 +262,7 @@ function OrderPage() {
           </div>
 
           <div className="hidden items-center gap-3 sm:flex">
+            <NotificationBell audience="student" userId={currentUser?.id} variant="dark" />
             <div className="text-right">
               <p className="text-xs text-white/70">Student dashboard</p>
               <p className="text-sm font-semibold text-white">{currentUser?.email || 'Ready to print'}</p>
@@ -209,20 +310,36 @@ function OrderPage() {
             <OrderForm
               quantity={quantity}
               pages={pages}
+              printMode={printMode}
+              printSides={printSides}
+              paperSize={paperSize}
+              finishing={finishing}
               uploadedFiles={uploadedFiles}
               isUploading={isUploading}
               onQuantityChange={setQuantity}
               onPagesChange={setPages}
+              onPrintModeChange={setPrintMode}
+              onPrintSidesChange={setPrintSides}
+              onPaperSizeChange={setPaperSize}
+              onFinishingChange={setFinishing}
               onFileSelect={handleFileSelect}
+              onRemoveFile={handleRemoveFile}
             />
           </div>
 
           <aside className="hidden lg:sticky lg:top-28 lg:block">
             <CartSummary
-              pricePerPage={PRICE_PER_PAGE}
+              pricePerPage={pricePerPage}
               pages={pages}
               quantity={quantity}
               totalPrice={totalPrice}
+              summaryRows={[
+                { label: 'Print Type', value: printMode === 'bw' ? 'Black & White' : 'Color' },
+                { label: 'Sides', value: printSides === 'double' ? 'Double-sided' : 'Single-sided' },
+                { label: 'Paper Size', value: paperSize },
+                { label: 'Finishing', value: getFinishingLabel(finishing, finishingCharge) },
+              ]}
+              priceNote={`Rs ${pricePerPage} x ${pages} pages x ${quantity} qty${finishingCharge ? ` + Rs ${finishingCharge} finishing/set` : ''}`}
               buttonLabel={isSubmitting ? 'Adding...' : 'Add to Cart'}
               onAction={handleAddToCart}
             />
@@ -231,7 +348,7 @@ function OrderPage() {
       </main>
 
       <div className="fixed inset-x-0 bottom-[5.25rem] z-40 px-4 sm:px-6 lg:hidden">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 rounded-[1.5rem] border border-white/20 bg-surface-container-highest/90 px-4 py-3 shadow-[0_20px_40px_rgba(32,48,68,0.12)] backdrop-blur-xl">
+        <div className="glass-surface mx-auto flex max-w-6xl items-center justify-between gap-4 rounded-[1.5rem] px-4 py-3 shadow-[0_20px_40px_rgba(32,48,68,0.12)]">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
               Total Price

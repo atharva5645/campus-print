@@ -6,6 +6,8 @@ import HomePage from './pages/HomePage'
 import OrderPage from './pages/OrderPage'
 import CartPage from './pages/CartPage'
 import SettingsPage from './pages/SettingsPage'
+import SuccessPage from './pages/SuccessPage'
+import ScanPage from './pages/ScanPage'
 
 function App() {
   return (
@@ -19,6 +21,8 @@ function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/cart" element={<CartPage />} />
+        <Route path="/success" element={<SuccessPage />} />
+        <Route path="/scan" element={<ScanPage />} />
       </Routes>
     </BrowserRouter>
   )

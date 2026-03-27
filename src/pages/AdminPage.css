@@ -6,17 +6,49 @@
   --primary-glow: rgba(74,64,224,0.25);
   --secondary: #00628c;
   --tertiary: #006947;
+  --bg: #f0f4ff;
   --card: #ffffff;
+  --card-soft: #f0f4ff;
+  --card-soft-hover: #dde8ff;
   --text: #203044;
   --text-muted: #4d5d73;
   --border: #9eaec7;
   --error: #b41340;
+  --sidebar-bg: #ffffff;
+  --inventory-bg: #dce9ff;
+  --inventory-progress-bg: rgba(255,255,255,.45);
+  --settings-bg: rgba(255,255,255,0.82);
+  --nav-active-bg: #eef2ff;
   --sidebar-w: 240px;
   --header-h: 68px;
   min-height: 100dvh;
-  background: #f0f4ff;
-  color: #203044;
+  background: var(--bg);
+  color: var(--text);
   font-family: 'Be Vietnam Pro', sans-serif;
+}
+
+.dark .admin-page {
+  --primary: #8582ff;
+  --primary-dark: #6c6aff;
+  --primary-light: rgba(133,130,255,0.12);
+  --primary-glow: rgba(133,130,255,0.25);
+  --secondary: #81ccff;
+  --tertiary: #58e7ab;
+  --card: #152030;
+  --bg: #0d1b2e;
+  --text: #cfdeff;
+  --text-muted: #9eaec7;
+  --border: #2d3d52;
+  --error: #ff6b8a;
+  --card-bg-subtle: #1e2d42;
+  --card-soft: #202d42;
+  --card-soft-hover: #293954;
+  --sidebar-bg: #111929;
+  --inventory-bg: #15263c;
+  --inventory-progress-bg: rgba(255,255,255,.12);
+  --settings-bg: rgba(21,32,48,0.92);
+  --nav-active-bg: rgba(133,130,255,0.16);
+  --overlay-bg: rgba(0,0,0,0.7);
 }
 
 .admin-page .material-symbols-outlined {
@@ -32,8 +64,8 @@
 
 .admin-sidebar {
   width: var(--sidebar-w);
-  background: #ffffff;
-  border-right: 1px solid rgba(158,174,199,0.2);
+  background: var(--sidebar-bg);
+  border-right: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -46,7 +78,7 @@
 
 .admin-sidebar-logo {
   padding: 1.5rem 1.25rem 1rem;
-  border-bottom: 1px solid rgba(158,174,199,0.15);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 24%, transparent);
   display: flex;
   align-items: center;
   gap: .75rem;
@@ -119,7 +151,7 @@
 .admin-nav-badge {
   margin-left: auto;
   background: var(--error);
-  color: #fff;
+  color: var(--card);
   font-size: 10px;
   font-weight: 700;
   padding: 1px 6px;
@@ -129,7 +161,7 @@
 
 .admin-sidebar-footer {
   padding: 1rem .75rem 1.5rem;
-  border-top: 1px solid rgba(158,174,199,0.15);
+  border-top: 1px solid color-mix(in srgb, var(--border) 24%, transparent);
 }
 
 .admin-sidebar-user {
@@ -138,7 +170,7 @@
   gap: .75rem;
   padding: .7rem 1rem;
   border-radius: .875rem;
-  background: #f0f4ff;
+  background: var(--card-bg-subtle, #f0f4ff);
 }
 
 .admin-sidebar-user img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
@@ -155,8 +187,8 @@
 
 .admin-topbar {
   height: var(--header-h);
-  background: #fff;
-  border-bottom: 1px solid rgba(158,174,199,0.15);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -164,7 +196,7 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  box-shadow: 0 2px 12px rgba(32,48,68,0.04);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .admin-topbar-inner {
@@ -191,7 +223,7 @@
   width: 38px;
   height: 38px;
   border: none;
-  background: #f0f4ff;
+  background: var(--card-bg-subtle, #f0f4ff);
   border-radius: 50%;
   cursor: pointer;
   display: flex;
@@ -213,7 +245,7 @@
   height: 8px;
   background: var(--error);
   border-radius: 50%;
-  border: 2px solid #fff;
+  border: 2px solid var(--card);
 }
 
 .admin-main-scroll {
@@ -241,8 +273,8 @@
 }
 
 .admin-notification-item {
-  background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(158,174,199,0.16);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 1rem;
   padding: 1rem 1.1rem;
   box-shadow: 0 2px 12px rgba(32,48,68,0.05);
@@ -396,7 +428,7 @@
 
 .admin-filter-chip {
   border: none;
-  background: rgba(255,255,255,0.8);
+  background: var(--card);
   color: var(--text-muted);
   border-radius: 999px;
   padding: .5rem .9rem;
@@ -465,7 +497,7 @@
 }
 .admin-svc-action-btn {
   border: none;
-  background: #eef2ff;
+  background: var(--card-soft);
   color: var(--primary);
   border-radius: 999px;
   padding: .35rem .75rem;
@@ -475,14 +507,14 @@
   transition: background .15s, transform .15s;
 }
 .admin-svc-action-btn:hover {
-  background: #dde8ff;
+  background: var(--card-soft-hover);
 }
 .admin-svc-action-btn-delete {
-  background: #fff1f4;
+  background: color-mix(in srgb, var(--error) 14%, var(--card));
   color: var(--error);
 }
 .admin-svc-action-btn-delete:hover {
-  background: #ffe2e9;
+  background: color-mix(in srgb, var(--error) 22%, var(--card));
 }
 
 .admin-toggle { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
@@ -491,7 +523,7 @@
 .admin-toggle-track {
   position: absolute;
   inset: 0;
-  background: #cbd5e1;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 999px;
   cursor: pointer;
   transition: background .2s;
@@ -504,7 +536,7 @@
   height: 18px;
   left: 3px;
   top: 3px;
-  background: #fff;
+  background: var(--card);
   border-radius: 50%;
   transition: transform .2s;
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
@@ -536,7 +568,7 @@
   width: 44px;
   height: 44px;
   border-radius: .75rem;
-  background: #eaf1ff;
+  background: var(--card-soft);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -550,7 +582,7 @@
   font-size: 10px;
   font-weight: 700;
   color: var(--primary-dark);
-  background: rgba(151,149,255,.15);
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
   padding: 2px 8px;
   border-radius: 4px;
   margin-bottom: 4px;
@@ -589,7 +621,7 @@
 .admin-bento-row { display: grid; grid-template-columns: 2fr 1fr; gap: 1.25rem; }
 
 .admin-bento-inventory {
-  background: #dce9ff;
+  background: var(--inventory-bg);
   border-radius: 1.5rem;
   padding: 1.75rem;
   position: relative;
@@ -604,7 +636,7 @@
 }
 
 .admin-progress-bar {
-  background: rgba(255,255,255,.45);
+  background: var(--inventory-progress-bg);
   border-radius: 999px;
   height: 10px;
   overflow: hidden;
@@ -671,7 +703,7 @@
 }
 
 .admin-settings-card {
-  background: rgba(255,255,255,0.82);
+  background: var(--settings-bg);
   border-radius: 1.5rem;
   padding: 1.5rem;
   box-shadow: 0 2px 14px rgba(32,48,68,0.06);
@@ -706,7 +738,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #eaf1ff;
+  background: var(--card-soft);
   color: var(--text);
   border: none;
   border-radius: 999px;
@@ -719,6 +751,7 @@
 }
 
 .admin-btn-ghost:hover { background: #d2e4ff; }
+.admin-btn-ghost:hover { background: var(--card-soft-hover); }
 
 .admin-mobile-header {
   display: none;
@@ -765,9 +798,9 @@
   left: 0;
   right: 0;
   z-index: 90;
-  background: rgba(255,255,255,.92);
+  background: var(--card);
   backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(200,210,230,.3);
+  border-top: 1px solid var(--border);
   border-radius: 1.5rem 1.5rem 0 0;
   box-shadow: 0 -4px 24px rgba(0,0,0,.06);
   padding: .75rem .5rem 1.25rem;
@@ -792,7 +825,7 @@
   cursor: pointer;
 }
 
-.admin-bnav-item.active { background: #eef2ff; color: #4338ca; }
+.admin-bnav-item.active { background: var(--nav-active-bg); color: var(--primary); }
 .admin-bnav-item .material-symbols-outlined { font-size: 22px; }
 
 .admin-bnav-item.active .material-symbols-outlined {
@@ -804,7 +837,7 @@
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0,0,0,.45);
+  background: var(--overlay-bg, rgba(0,0,0,.45));
   backdrop-filter: blur(4px);
   align-items: flex-end;
   justify-content: center;
@@ -813,7 +846,7 @@
 .admin-overlay.open { display: flex; }
 
 .admin-sheet {
-  background: #fff;
+  background: var(--card);
   width: 100%;
   max-width: 520px;
   border-radius: 1.5rem 1.5rem 0 0;
@@ -855,7 +888,7 @@
   font-weight: 500;
   font-family: 'Be Vietnam Pro', sans-serif;
   color: var(--text);
-  background: #fff;
+  background: var(--card);
   border: 2px solid var(--border);
   border-radius: 12px;
   outline: none;
@@ -891,7 +924,7 @@
   border-radius: 12px;
   border: 2px solid transparent;
   cursor: pointer;
-  background: #f4f6ff;
+  background: var(--card-bg-subtle, #f4f6ff);
   transition: all .15s;
 }
 
@@ -904,7 +937,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #f4f6ff;
+  background: var(--card-bg-subtle, #f4f6ff);
   border-radius: .875rem;
   padding: .875rem 1rem;
   margin-bottom: 1.5rem;

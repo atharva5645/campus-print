@@ -12,46 +12,15 @@ import {
 } from '../api/adminApi'
 import { getLocalServices, saveLocalServices, syncLocalServices } from '../lib/localServices'
 import { updateOrderStatus } from '../api/orderApi'
-
-const fallbackJobs = [
-  {
-    id: 'JOB-2031',
-    icon: 'picture_as_pdf',
-    name: 'EEE Internal Record Bundle',
-    meta: [
-      { icon: 'person', label: 'Neha' },
-      { icon: 'layers', label: '84 pages' },
-      { icon: 'schedule', label: '5 min ago' },
-    ],
-    status: 'In Review',
-    statusBg: '#eef2ff',
-    statusColor: '#4a40e0',
-  },
-  {
-    id: 'JOB-2027',
-    icon: 'menu_book',
-    name: 'Blue Books Restock',
-    meta: [
-      { icon: 'inventory_2', label: '120 units' },
-      { icon: 'schedule', label: '18 min ago' },
-    ],
-    status: 'Completed',
-    statusBg: '#e8f7ef',
-    statusColor: '#006947',
-  },
-  {
-    id: 'JOB-2019',
-    icon: 'warning',
-    name: 'Department Forms Batch',
-    meta: [
-      { icon: 'apartment', label: 'CSE Office' },
-      { icon: 'schedule', label: '31 min ago' },
-    ],
-    status: 'Needs Attention',
-    statusBg: '#fff1f4',
-    statusColor: '#b41340',
-  },
-]
+import NotificationBell from '../components/NotificationBell'
+import ServiceDocumentsModal from '../components/ServiceDocumentsModal'
+import { supabase } from '../lib/supabase'
+import {
+  clearCompletedPrototypeOrders,
+  getPrototypeOrders,
+  getPrototypeStats,
+  updatePrototypeOrderStatus,
+} from '../lib/prototypeData'
 
 const fallbackStats = {
   todayJobs: 128,
@@ -78,11 +47,109 @@ function normalizeServices(services) {
   }))
 }
 
+function mapSupabaseService(service) {
+  return {
+    ...service,
+    bg: service.background || service.bg,
+    color: service.color || '#4a40e0',
+  }
+}
+
+async function findSupabaseServiceByName(name) {
+  const { data, error } = await supabase
+    .from('services')
+    .select('id, name, icon, enabled, color, background, created_at, updated_at')
+    .eq('name', name)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  return data?.[0] || null
+}
+
+async function createSupabaseService(payload) {
+  const { data, error } = await supabase
+    .from('services')
+    .insert({
+      name: payload.name,
+      icon: payload.icon,
+      enabled: payload.enabled,
+      color: payload.color || '#4a40e0',
+      background: payload.background || '#eef2ff',
+    })
+    .select('id, name, icon, enabled, color, background, created_at, updated_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+async function updateSupabaseService(id, payload) {
+  const { data, error } = await supabase
+    .from('services')
+    .update({
+      name: payload.name,
+      icon: payload.icon,
+      enabled: payload.enabled,
+      color: payload.color,
+      background: payload.background,
+    })
+    .eq('id', id)
+    .select('id, name, icon, enabled, color, background, created_at, updated_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+async function deleteSupabaseService(id) {
+  const { error } = await supabase
+    .from('services')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
+function mapJobs(jobs) {
+  return jobs.map((job) => {
+    if (job.meta) return job
+
+    const statusMap = {
+      pending: { label: 'Pending', bg: '#eef2ff', color: '#4a40e0', icon: 'schedule' },
+      in_review: { label: 'In Review', bg: '#eef2ff', color: '#4a40e0', icon: 'picture_as_pdf' },
+      processing: { label: 'Processing', bg: '#e9f8ff', color: '#00628c', icon: 'print' },
+      completed: { label: 'Completed', bg: '#e8f7ef', color: '#006947', icon: 'check_circle' },
+      cancelled: { label: 'Cancelled', bg: '#fff1f4', color: '#b41340', icon: 'warning' },
+    }
+
+    const state = statusMap[job.status] || statusMap.pending
+    const isPrototype = String(job.id || '').startsWith('proto-order-')
+
+    return {
+      rawId: job.id,
+      originalStatus: job.status,
+      isRemote: !isPrototype,
+      id: isPrototype ? `PROTO-${String(job.id).slice(-4).toUpperCase()}` : job.id.slice(0, 8).toUpperCase(),
+      icon: state.icon,
+      name: job.services?.name || job.service_name || 'Printing Order',
+      meta: [
+        { icon: 'person', label: job.student_name || 'CampusPrint Student' },
+        { icon: 'layers', label: `${job.pages} pages` },
+        { icon: 'inventory_2', label: `${job.quantity} set${job.quantity > 1 ? 's' : ''}` },
+      ],
+      status: state.label,
+      statusBg: state.bg,
+      statusColor: state.color,
+    }
+  })
+}
+
 function AdminPage() {
   const navigate = useNavigate()
   const [services, setServices] = useState(() => normalizeServices(getLocalServices()))
   const [stats, setStats] = useState(fallbackStats)
-  const [jobs, setJobs] = useState(fallbackJobs)
+  const [jobs, setJobs] = useState(() => getPrototypeOrders())
   const [isOverlayOpen, setIsOverlayOpen] = useState(false)
   const [serviceName, setServiceName] = useState('')
   const [selectedIcon, setSelectedIcon] = useState('print')
@@ -91,68 +158,40 @@ function AdminPage() {
   const [showNameError, setShowNameError] = useState(false)
   const [isSavingService, setIsSavingService] = useState(false)
   const [pageError, setPageError] = useState('')
+  const [documentModal, setDocumentModal] = useState({
+    open: false,
+    mode: 'upload',
+    service: null,
+  })
   const [activeSection, setActiveSection] = useState('overview')
   const [showFilters, setShowFilters] = useState(false)
   const [jobFilter, setJobFilter] = useState('all')
-  const [showNotifications, setShowNotifications] = useState(false)
 
   const overviewRef = useRef(null)
   const servicesRef = useRef(null)
   const jobsRef = useRef(null)
   const inventoryRef = useRef(null)
 
-  const mappedJobs = useMemo(
-    () =>
-      jobs.map((job) => {
-        if (job.meta) return job
-
-        const statusMap = {
-          pending: { label: 'Pending', bg: '#eef2ff', color: '#4a40e0', icon: 'schedule' },
-          in_review: { label: 'In Review', bg: '#eef2ff', color: '#4a40e0', icon: 'picture_as_pdf' },
-          processing: { label: 'Processing', bg: '#e9f8ff', color: '#00628c', icon: 'print' },
-          completed: { label: 'Completed', bg: '#e8f7ef', color: '#006947', icon: 'check_circle' },
-          cancelled: { label: 'Cancelled', bg: '#fff1f4', color: '#b41340', icon: 'warning' },
-        }
-
-        const state = statusMap[job.status] || statusMap.pending
-
-        return {
-          rawId: job.id,
-          originalStatus: job.status,
-          isRemote: true,
-          id: job.id.slice(0, 8).toUpperCase(),
-          icon: state.icon,
-          name: job.services?.name || 'Printing Order',
-          meta: [
-            { icon: 'layers', label: `${job.pages} pages` },
-            { icon: 'inventory_2', label: `${job.quantity} set${job.quantity > 1 ? 's' : ''}` },
-            { icon: 'schedule', label: 'Recently created' },
-          ],
-          status: state.label,
-          statusBg: state.bg,
-          statusColor: state.color,
-        }
-      }),
-    [jobs]
-  )
+  const mappedJobs = useMemo(() => mapJobs(jobs), [jobs])
 
   const filteredJobs = useMemo(() => {
     if (jobFilter === 'all') return mappedJobs
     return mappedJobs.filter((job) => job.status.toLowerCase().replaceAll(' ', '_') === jobFilter)
   }, [jobFilter, mappedJobs])
 
-  const alertItems = useMemo(
-    () => [
-      { title: `${stats.openAlerts} open alerts`, subtitle: 'Review warnings and maintenance notices.' },
-      { title: `${mappedJobs.length} jobs in queue`, subtitle: 'Latest requests are ready for status updates.' },
-      pageError
-        ? { title: 'Connection issue detected', subtitle: pageError }
-        : { title: 'System synced', subtitle: 'Backend and Supabase are responding normally.' },
-    ],
-    [mappedJobs.length, pageError, stats.openAlerts]
-  )
-
   useEffect(() => {
+    function loadPrototypeState() {
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+
+      setJobs(prototypeJobs)
+      setStats((current) => ({
+        ...current,
+        todayJobs: prototypeStats.todayJobs,
+        openAlerts: prototypeStats.openAlerts,
+      }))
+    }
+
     async function loadAdminData() {
       try {
         const [serviceData, statsData, recentJobs] = await Promise.all([
@@ -166,18 +205,46 @@ function AdminPage() {
         setStats(statsData)
         if (recentJobs.length > 0) {
           setJobs(recentJobs)
+        } else {
+          loadPrototypeState()
         }
         setPageError('')
-      } catch (error) {
+      } catch {
         const localServices = normalizeServices(getLocalServices())
+        const prototypeStats = getPrototypeStats()
+        const prototypeJobs = getPrototypeOrders()
+
         setServices(localServices)
-        setStats({ ...fallbackStats, services: localServices.length })
-        setJobs(fallbackJobs)
-        setPageError('Live admin data is temporarily unavailable. Using local service changes for now.')
+        setStats({
+          todayJobs: prototypeStats.todayJobs,
+          services: localServices.length,
+          openAlerts: prototypeStats.openAlerts,
+        })
+        setJobs(prototypeJobs)
+        setPageError('Prototype mode is active. New student orders will appear here even while the backend is offline.')
       }
     }
 
     loadAdminData()
+
+    const handleStorage = () => {
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+      setJobs(prototypeJobs)
+      setStats((current) => ({
+        ...current,
+        todayJobs: prototypeStats.todayJobs,
+        openAlerts: prototypeStats.openAlerts,
+      }))
+    }
+
+    const intervalId = window.setInterval(handleStorage, 3000)
+    window.addEventListener('storage', handleStorage)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('storage', handleStorage)
+    }
   }, [])
 
   function persistServices(nextServices) {
@@ -212,6 +279,74 @@ function AdminPage() {
     setShowNameError(false)
   }
 
+  async function ensureServiceHasCloudId(service, overrides = {}) {
+    if (!service) return null
+
+    const payload = {
+      name: overrides.name ?? service.name,
+      icon: overrides.icon ?? service.icon ?? 'print',
+      enabled: overrides.enabled ?? Boolean(service.enabled),
+      color: overrides.color ?? service.color ?? '#4a40e0',
+      background: overrides.background ?? service.background ?? service.bg ?? '#eef2ff',
+    }
+
+    if (service.id && !String(service.id).startsWith('local-')) {
+      const updatedService = await updateSupabaseService(service.id, payload)
+      return mapSupabaseService(updatedService)
+    }
+
+    const existingService = await findSupabaseServiceByName(payload.name)
+
+    if (existingService) {
+      const updatedExistingService = await updateSupabaseService(existingService.id, payload)
+      return mapSupabaseService(updatedExistingService)
+    }
+
+    const createdService = await createSupabaseService(payload)
+    return mapSupabaseService(createdService)
+  }
+
+  function replaceServiceLocally(previousService, nextService) {
+    const nextServices = services.map((item) =>
+      (item.id || item.name) === (previousService.id || previousService.name)
+        ? { ...nextService, isNew: previousService.isNew }
+        : item
+    )
+
+    persistServices(nextServices)
+    return nextServices
+  }
+
+  async function openDocumentModal(mode, service) {
+    try {
+      let targetService = service
+
+      if (service?.id && String(service.id).startsWith('local-')) {
+        targetService = await ensureServiceHasCloudId(service)
+        replaceServiceLocally(service, targetService)
+        setPageError('The selected service was synced to Supabase so document management can work.')
+      } else {
+        setPageError('')
+      }
+
+      setDocumentModal({
+        open: true,
+        mode,
+        service: targetService,
+      })
+    } catch (error) {
+      setPageError(error.message || 'This service could not be synced to Supabase yet.')
+    }
+  }
+
+  function closeDocumentModal() {
+    setDocumentModal({
+      open: false,
+      mode: 'upload',
+      service: null,
+    })
+  }
+
   function scrollToSection(section) {
     const map = {
       overview: overviewRef,
@@ -221,7 +356,6 @@ function AdminPage() {
     }
 
     setActiveSection(section)
-    setShowNotifications(false)
     if (section === 'settings') {
       navigate('/settings')
       return
@@ -246,20 +380,27 @@ function AdminPage() {
     const nextServices = services.filter((service) => service !== serviceToDelete)
     persistServices(nextServices)
 
-    if (!serviceToDelete.id || String(serviceToDelete.id).startsWith('local-')) {
-      setPageError('')
-      return
-    }
-
     try {
-      await deleteService(serviceToDelete.id)
+      if (!serviceToDelete.id || String(serviceToDelete.id).startsWith('local-')) {
+        const existingService = await findSupabaseServiceByName(serviceToDelete.name)
+        if (existingService?.id) {
+          await deleteSupabaseService(existingService.id)
+        }
+      } else {
+        try {
+          await deleteService(serviceToDelete.id)
+        } catch {
+          await deleteSupabaseService(serviceToDelete.id)
+        }
+      }
+
       setPageError('')
     } catch (error) {
       setPageError(`${error.message}. The service was removed locally on this device.`)
     }
   }
 
-  function handleToggleService(index) {
+  async function handleToggleService(index) {
     const service = services[index]
     if (!service) return
 
@@ -270,18 +411,17 @@ function AdminPage() {
 
     persistServices(updatedServices)
 
-    if (!service.id || String(service.id).startsWith('local-')) {
+    try {
+      const syncedService = await ensureServiceHasCloudId(service, { enabled: nextValue })
+      replaceServiceLocally(service, syncedService)
       setPageError('')
-      return
-    }
-
-    toggleService(service.id, nextValue).catch((error) => {
+    } catch (error) {
       const revertedServices = updatedServices.map((item, serviceIndex) =>
         serviceIndex === index ? { ...item, enabled: service.enabled } : item
       )
       persistServices(revertedServices)
       setPageError(`${error.message}. Local changes are still available on this device.`)
-    })
+    }
   }
 
   async function handleJobStatusToggle(jobToUpdate) {
@@ -291,10 +431,19 @@ function AdminPage() {
     const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
 
     if (!jobToUpdate.isRemote) {
-      setJobs((current) =>
-        current.map((job) =>
-          job.id === jobToUpdate.id ? { ...job, status: nextStatus } : job
-        )
+      const updated = updatePrototypeOrderStatus(jobToUpdate.rawId, nextStatus)
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+      setJobs(prototypeJobs)
+      setStats((current) => ({
+        ...current,
+        todayJobs: prototypeStats.todayJobs,
+        openAlerts: prototypeStats.openAlerts,
+      }))
+      setPageError(
+        updated?.status === 'completed'
+          ? 'Student notified: the order is ready to take.'
+          : ''
       )
       return
     }
@@ -307,8 +456,23 @@ function AdminPage() {
         )
       )
       setPageError('')
-    } catch (error) {
-      setPageError(error.message)
+    } catch {
+      const updated = updatePrototypeOrderStatus(jobToUpdate.rawId, nextStatus)
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+      if (updated) {
+        setJobs(prototypeJobs)
+        setStats((current) => ({
+          ...current,
+          todayJobs: prototypeStats.todayJobs,
+          openAlerts: prototypeStats.openAlerts,
+        }))
+        setPageError(
+          updated.status === 'completed'
+            ? 'Student notified: the order is ready to take.'
+            : 'Order updated in prototype mode.'
+        )
+      }
     }
   }
 
@@ -322,23 +486,42 @@ function AdminPage() {
     try {
       setIsSavingService(true)
 
-      if (editingServiceId) {
-        const currentService = services.find((service) => (service.id || service.name) === editingServiceId)
-        if (!currentService) {
-          closeOverlay()
-          return
-        }
+        if (editingServiceId) {
+          const currentService = services.find((service) => (service.id || service.name) === editingServiceId)
+          if (!currentService) {
+            closeOverlay()
+            return
+          }
 
-        let updatedService
-        if (currentService.id && !String(currentService.id).startsWith('local-')) {
+          let updatedService
           try {
-            updatedService = await updateService(currentService.id, {
-              name: trimmed,
-              icon: selectedIcon,
-              enabled,
-              color: currentService.color || '#4a40e0',
-              background: currentService.background || currentService.bg || '#eef2ff',
-            })
+            if (currentService.id && !String(currentService.id).startsWith('local-')) {
+              try {
+                updatedService = await updateService(currentService.id, {
+                  name: trimmed,
+                  icon: selectedIcon,
+                  enabled,
+                  color: currentService.color || '#4a40e0',
+                  background: currentService.background || currentService.bg || '#eef2ff',
+                })
+              } catch {
+                updatedService = await updateSupabaseService(currentService.id, {
+                  name: trimmed,
+                  icon: selectedIcon,
+                  enabled,
+                  color: currentService.color || '#4a40e0',
+                  background: currentService.background || currentService.bg || '#eef2ff',
+                })
+              }
+            } else {
+              updatedService = await ensureServiceHasCloudId(currentService, {
+                name: trimmed,
+                icon: selectedIcon,
+                enabled,
+                color: currentService.color || '#4a40e0',
+                background: currentService.background || currentService.bg || '#eef2ff',
+              })
+            }
           } catch {
             updatedService = {
               ...currentService,
@@ -347,14 +530,6 @@ function AdminPage() {
               enabled,
             }
           }
-        } else {
-          updatedService = {
-            ...currentService,
-            name: trimmed,
-            icon: selectedIcon,
-            enabled,
-          }
-        }
 
         const nextServices = services.map((item) =>
           (item.id || item.name) === editingServiceId
@@ -368,27 +543,37 @@ function AdminPage() {
         )
 
         persistServices(nextServices)
-      } else {
-        let createdService
+        } else {
+          let createdService
 
-        try {
-          createdService = await createService({
+          try {
+            createdService = await createService({
             name: trimmed,
             icon: selectedIcon,
             enabled,
-            color: '#4a40e0',
-            background: '#eef2ff',
-          })
-        } catch {
-          createdService = {
-            id: `local-${Date.now()}`,
-            name: trimmed,
-            icon: selectedIcon,
-            enabled,
-            color: '#4a40e0',
-            background: '#eef2ff',
+              color: '#4a40e0',
+              background: '#eef2ff',
+            })
+          } catch {
+            try {
+              createdService = await createSupabaseService({
+                name: trimmed,
+                icon: selectedIcon,
+                enabled,
+                color: '#4a40e0',
+                background: '#eef2ff',
+              })
+            } catch {
+              createdService = {
+                id: `local-${Date.now()}`,
+                name: trimmed,
+                icon: selectedIcon,
+                enabled,
+                color: '#4a40e0',
+                background: '#eef2ff',
+              }
+            }
           }
-        }
 
         const nextServices = [
           { ...createdService, bg: createdService.background, color: createdService.color, isNew: true },
@@ -403,6 +588,29 @@ function AdminPage() {
     } finally {
       setIsSavingService(false)
     }
+  }
+
+  function handleClearCompletedOrders() {
+    const completedCount = getPrototypeOrders().filter((order) => order.status === 'completed').length
+
+    if (completedCount === 0) {
+      setPageError('There are no completed prototype orders to clear right now.')
+      return
+    }
+
+    const confirmed = window.confirm(`Clear ${completedCount} completed order${completedCount > 1 ? 's' : ''}?`)
+    if (!confirmed) return
+
+    const remainingOrders = clearCompletedPrototypeOrders()
+    const prototypeStats = getPrototypeStats()
+
+    setJobs(remainingOrders)
+    setStats((current) => ({
+      ...current,
+      todayJobs: prototypeStats.todayJobs,
+      openAlerts: prototypeStats.openAlerts,
+    }))
+    setPageError('Completed prototype orders were cleared.')
   }
 
   return (
@@ -469,32 +677,13 @@ function AdminPage() {
                 <div className="admin-topbar-sub">Monitor print requests, services, and system health.</div>
               </div>
               <div className="admin-topbar-actions">
-                <button
-                  className="admin-icon-btn admin-topbar-notif"
-                  type="button"
-                  aria-label="Notifications"
-                  onClick={() => setShowNotifications((current) => !current)}
-                >
-                  <span className="material-symbols-outlined">notifications</span>
-                  <span className="admin-notif-dot" />
-                </button>
+                <NotificationBell audience="admin" />
               </div>
             </div>
           </header>
 
           <main className="admin-main-scroll">
             <div className="admin-main-inner">
-              {showNotifications && (
-                <section className="admin-notification-panel">
-                  {alertItems.map((alert) => (
-                    <div key={alert.title} className="admin-notification-item">
-                      <p className="admin-notification-title">{alert.title}</p>
-                      <p className="admin-notification-sub">{alert.subtitle}</p>
-                    </div>
-                  ))}
-                </section>
-              )}
-
               <section ref={overviewRef} className="admin-hero-grid">
                 <div className="admin-hero-main">
                   <h2>Everything in the print room is moving on time.</h2>
@@ -533,7 +722,7 @@ function AdminPage() {
                   </div>
                   <div>
                     <div className="admin-stat-mini-val">{stats.openAlerts}</div>
-                    <div className="admin-stat-mini-lbl">Alerts open</div>
+                    <div className="admin-stat-mini-lbl">Open jobs</div>
                   </div>
                 </div>
               </section>
@@ -586,6 +775,20 @@ function AdminPage() {
                             </button>
                             <button
                               type="button"
+                              className="admin-svc-action-btn"
+                              onClick={() => openDocumentModal('upload', service)}
+                            >
+                              Upload Document
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-svc-action-btn"
+                              onClick={() => openDocumentModal('view', service)}
+                            >
+                              View Documents
+                            </button>
+                            <button
+                              type="button"
                               className="admin-svc-action-btn admin-svc-action-btn-delete"
                               onClick={() => handleDeleteService(service)}
                             >
@@ -606,10 +809,16 @@ function AdminPage() {
                     <div className="admin-section-label">Queue</div>
                     <div className="admin-section-title">Recent print jobs</div>
                   </div>
-                  <button className="admin-btn-ghost" type="button" onClick={() => setShowFilters((current) => !current)}>
-                    <span className="material-symbols-outlined">tune</span>
-                    Filter
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button className="admin-btn-ghost" type="button" onClick={handleClearCompletedOrders}>
+                      <span className="material-symbols-outlined">delete_sweep</span>
+                      Clear Completed
+                    </button>
+                    <button className="admin-btn-ghost" type="button" onClick={() => setShowFilters((current) => !current)}>
+                      <span className="material-symbols-outlined">tune</span>
+                      Filter
+                    </button>
+                  </div>
                 </div>
                 {showFilters && (
                   <div className="admin-filter-row">
@@ -632,36 +841,55 @@ function AdminPage() {
                   </div>
                 )}
                 <div className="admin-jobs-list">
-                  {filteredJobs.map((job) => (
-                    <div key={job.id} className="admin-job-card">
+                  {filteredJobs.length === 0 ? (
+                    <div className="admin-job-card">
                       <div className="admin-job-left">
                         <div className="admin-job-icon">
-                          <span className="material-symbols-outlined">{job.icon}</span>
+                          <span className="material-symbols-outlined">inbox</span>
                         </div>
                         <div>
-                          <span className="admin-job-id">{job.id}</span>
-                          <div className="admin-job-name">{job.name}</div>
+                          <div className="admin-job-name">No print jobs yet</div>
                           <div className="admin-job-meta">
-                            {job.meta.map((item) => (
-                              <span key={`${job.id}-${item.label}`}>
-                                <span className="material-symbols-outlined">{item.icon}</span>
-                                {item.label}
-                              </span>
-                            ))}
+                            <span>
+                              <span className="material-symbols-outlined">schedule</span>
+                              New student orders will appear here
+                            </span>
                           </div>
                         </div>
                       </div>
-                      <button
-                        className="admin-status-badge"
-                        type="button"
-                        style={{ background: job.statusBg, color: job.statusColor }}
-                        onClick={() => handleJobStatusToggle(job)}
-                      >
-                        <span className="admin-badge-dot" style={{ background: job.statusColor }} />
-                        {job.status}
-                      </button>
                     </div>
-                  ))}
+                  ) : (
+                    filteredJobs.map((job) => (
+                      <div key={job.id} className="admin-job-card">
+                        <div className="admin-job-left">
+                          <div className="admin-job-icon">
+                            <span className="material-symbols-outlined">{job.icon}</span>
+                          </div>
+                          <div>
+                            <span className="admin-job-id">{job.id}</span>
+                            <div className="admin-job-name">{job.name}</div>
+                            <div className="admin-job-meta">
+                              {job.meta.map((item) => (
+                                <span key={`${job.id}-${item.label}`}>
+                                  <span className="material-symbols-outlined">{item.icon}</span>
+                                  {item.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          className="admin-status-badge"
+                          type="button"
+                          style={{ background: job.statusBg, color: job.statusColor }}
+                          onClick={() => handleJobStatusToggle(job)}
+                        >
+                          <span className="admin-badge-dot" style={{ background: job.statusColor }} />
+                          {job.status}
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </section>
 
@@ -790,6 +1018,13 @@ function AdminPage() {
           </button>
         </div>
       </div>
+
+      <ServiceDocumentsModal
+        isOpen={documentModal.open}
+        mode={documentModal.mode}
+        service={documentModal.service}
+        onClose={closeDocumentModal}
+      />
     </div>
   )
 }

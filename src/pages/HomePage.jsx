@@ -1,66 +1,309 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { LogOut } from 'lucide-react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
+import { UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getServices } from '../api/adminApi'
 import BottomNav from '../components/BottomNav'
-import { signOut } from '../lib/auth'
-import { getLocalServices, syncLocalServices } from '../lib/localServices'
+import NotificationBell from '../components/NotificationBell'
+import ServiceDocumentsSheet from '../components/ServiceDocumentsSheet'
+import { addLocalCartItem } from '../lib/localCart'
+import { getLocalServices, getStudentSafeServices, syncLocalServices } from '../lib/localServices'
+import { getStudentProfile } from '../lib/studentProfile'
+import { supabase } from '../lib/supabase'
+
+function getGreeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good Morning'
+  if (hour < 17) return 'Good Afternoon'
+  return 'Good Evening'
+}
+
+const studyQuotes = [
+  'Small progress every day builds strong results.',
+  'Study with focus now so your future feels lighter later.',
+  'Your consistency today becomes your confidence tomorrow.',
+  'One more chapter now is one less worry before exams.',
+  'Keep going. Even quiet study sessions are moving you forward.',
+  'Discipline in the library becomes freedom in the results.',
+]
+
+function getRotatingStudyQuote() {
+  const fallbackQuote = studyQuotes[0]
+
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return fallbackQuote
+  }
+
+  const lastQuote = window.localStorage.getItem('campus_print_last_quote')
+  const availableQuotes = studyQuotes.filter((quote) => quote !== lastQuote)
+  const pool = availableQuotes.length > 0 ? availableQuotes : studyQuotes
+  const nextQuote = pool[Math.floor(Math.random() * pool.length)] || fallbackQuote
+
+  window.localStorage.setItem('campus_print_last_quote', nextQuote)
+  return nextQuote
+}
+
+function getServiceSearchTerms(service) {
+  const baseTerms = [service.name, service.icon]
+  const name = service.name.toLowerCase()
+
+  if (name.includes('blue book')) {
+    baseTerms.push('book', 'books', 'exam', 'answer sheet', 'record', 'records')
+  }
+
+  if (name.includes('color printing')) {
+    baseTerms.push('print', 'printing', 'xerox', 'copy', 'copies', 'document', 'documents')
+  }
+
+  if (name.includes('no due')) {
+    baseTerms.push('form', 'forms', 'clearance', 'certificate')
+  }
+
+  if (name.includes('lab manual')) {
+    baseTerms.push('manual', 'manuals', 'record', 'records', 'lab', 'practical')
+  }
+
+  return baseTerms.join(' ').toLowerCase()
+}
+
+function getDefaultDisplayName(user) {
+  if (!user) return 'Student'
+
+  const metadata = user.user_metadata || {}
+  const fullName =
+    metadata.full_name ||
+    metadata.name ||
+    metadata.display_name ||
+    user.identities?.[0]?.identity_data?.full_name ||
+    user.identities?.[0]?.identity_data?.name
+
+  if (fullName && String(fullName).trim()) {
+    return String(fullName).trim().split(' ')[0]
+  }
+
+  const email = user.email || metadata.email || user.identities?.[0]?.identity_data?.email
+  if (email && String(email).includes('@')) {
+    return String(email).split('@')[0]
+  }
+
+  return 'Student'
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
+}
+
+function normalizeServiceShape(service) {
+  return {
+    ...service,
+    background: service.background || service.bg || '#eef2ff',
+    color: service.color || '#4a40e0',
+  }
+}
+
+function mergeServices(...serviceLists) {
+  const serviceMap = new Map()
+
+  serviceLists
+    .flat()
+    .filter(Boolean)
+    .forEach((service) => {
+      const normalizedService = normalizeServiceShape(service)
+      const nameKey = String(normalizedService.name || '').trim().toLowerCase()
+      const idKey = normalizedService.id ? String(normalizedService.id) : ''
+      const key = idKey || nameKey
+
+      if (!key) return
+
+      const existingService = serviceMap.get(key)
+
+      if (!existingService) {
+        serviceMap.set(key, normalizedService)
+        return
+      }
+
+      serviceMap.set(key, {
+        ...existingService,
+        ...normalizedService,
+        enabled: Boolean(existingService.enabled || normalizedService.enabled),
+      })
+    })
+
+  return Array.from(serviceMap.values())
+}
 
 function HomePage() {
   const navigate = useNavigate()
   const [services, setServices] = useState([])
+  const [documentsByService, setDocumentsByService] = useState({})
+  const [activeService, setActiveService] = useState(null)
+  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false)
   const [pageError, setPageError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
+  const [studentProfile, setStudentProfile] = useState(() => getStudentProfile())
+  const [featuredQuote] = useState(() => getRotatingStudyQuote())
+
+  const displayName = studentProfile.name || getDefaultDisplayName(currentUser)
+  const departmentLabel = studentProfile.department || 'Student profile'
+
+  async function loadSupabaseServices() {
+    const { data, error } = await supabase
+      .from('services')
+      .select('id, name, icon, enabled, color, background, created_at, updated_at')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return data || []
+  }
 
   async function loadServices() {
     try {
-      const serviceData = await getServices()
-      setServices(serviceData)
-      syncLocalServices(serviceData)
-      setPageError('')
-    } catch (error) {
-      setServices(getLocalServices())
-      setPageError('Using locally saved services for now. Admin changes on this device will still appear here.')
+      const [apiServices, supabaseServices] = await Promise.all([
+        getServices().catch(() => []),
+        loadSupabaseServices().catch(() => []),
+      ])
+
+      const mergedServices = mergeServices(apiServices, supabaseServices, getLocalServices())
+
+      if (mergedServices.length > 0) {
+        const safeServices = getStudentSafeServices(mergedServices)
+        setServices(safeServices)
+        syncLocalServices(safeServices)
+        setPageError('')
+        return
+      }
+
+      setServices(getStudentSafeServices(getLocalServices()))
+      setPageError('Using locally saved prototype services for now.')
+    } catch {
+      setServices(getStudentSafeServices(getLocalServices()))
+      setPageError('Using locally saved prototype services for now.')
     }
   }
 
-  async function handleLogout() {
+  async function loadCurrentUser() {
     try {
-      await signOut()
-    } catch (error) {
-      console.error(error)
-    } finally {
-      navigate('/', { replace: true })
+      const { data } = await supabase.auth.getUser()
+      setCurrentUser(data.user || null)
+    } catch {
+      setCurrentUser(null)
     }
+  }
+
+  async function loadDocuments(serviceData) {
+    const validServiceIds = (serviceData || [])
+      .map((service) => service.id)
+      .filter((id) => isUuid(id))
+
+    if (validServiceIds.length === 0) {
+      setDocumentsByService({})
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, service_id, title, file_url, created_at')
+        .in('service_id', validServiceIds)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      const groupedDocuments = (data || []).reduce((accumulator, item) => {
+        if (!accumulator[item.service_id]) {
+          accumulator[item.service_id] = []
+        }
+
+        accumulator[item.service_id].push(item)
+        return accumulator
+      }, {})
+
+      setDocumentsByService(groupedDocuments)
+    } catch {
+      setDocumentsByService({})
+    }
+  }
+
+  function handleOpenDocuments(service) {
+    setActiveService(service)
+    setIsDocumentsLoading(false)
+  }
+
+  function handleCloseDocuments() {
+    setActiveService(null)
+  }
+
+  function handleAddDocumentToCart(service, document) {
+    addLocalCartItem({
+      id: `service-document-${document.id}-${Date.now()}`,
+      serviceId: service.id,
+      serviceName: `${service.name} - ${document.title}`,
+      pages: 1,
+      quantity: 1,
+      pricePerPage: 0,
+      totalPrice: 0,
+      printMode: 'document',
+      printSides: 'single',
+      paperSize: 'Digital',
+      finishing: 'none',
+      uploadedFiles: [
+        {
+          name: document.title,
+          publicUrl: document.file_url,
+          type: 'pdf',
+        },
+      ],
+      isServiceDocument: true,
+      documentTitle: document.title,
+      documentUrl: document.file_url,
+    })
+
+    setPageError(`${document.title} was added to cart.`)
   }
 
   useEffect(() => {
-    loadServices()
+    loadServices().then(() => {})
+    loadCurrentUser()
+    setStudentProfile(getStudentProfile())
 
     const handleRefresh = () => {
-      loadServices()
+      loadServices().then(() => {})
+      loadCurrentUser()
+      setStudentProfile(getStudentProfile())
     }
 
     const intervalId = window.setInterval(() => {
       loadServices()
+      loadCurrentUser()
+      setStudentProfile(getStudentProfile())
     }, 8000)
 
     window.addEventListener('focus', handleRefresh)
+    window.addEventListener('storage', handleRefresh)
 
     return () => {
       window.clearInterval(intervalId)
       window.removeEventListener('focus', handleRefresh)
+      window.removeEventListener('storage', handleRefresh)
     }
   }, [])
 
-  const visibleServices = useMemo(
-    () => services.filter((service) => service.enabled),
-    [services]
-  )
+  useEffect(() => {
+    loadDocuments(services)
+  }, [services])
+
+  const visibleServices = useMemo(() => {
+    const enabledServices = services.filter((service) => service.enabled)
+    const query = searchQuery.trim().toLowerCase()
+
+    if (!query) return enabledServices
+
+    return enabledServices.filter((service) => getServiceSearchTerms(service).includes(query))
+  }, [services, searchQuery])
 
   return (
     <div className="bg-surface font-body text-on-surface min-h-screen pb-32">
-      {/* TopAppBar */}
-      <header className="bg-gradient-to-r from-indigo-600 to-indigo-400 dark:from-slate-900 dark:to-slate-800 flex justify-between items-center w-full px-6 py-4 rounded-b-[3rem] shadow-[0_20px_40px_rgba(32,48,68,0.06)] z-50 sticky top-0">
+      <header className="bg-gradient-to-br from-[var(--clr-primary)] via-[var(--clr-primary-dim)] to-[var(--clr-secondary)] flex justify-between items-center w-full px-6 py-5 rounded-b-[2.5rem] shadow-[0_20px_48px_rgba(32,48,68,0.12)] z-50 sticky top-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 overflow-hidden">
             <img
@@ -69,61 +312,59 @@ function HomePage() {
               src="https://lh3.googleusercontent.com/aida-public/AB6AXuAw1S-FQWyvNAw_-yaZ2TlKx9xJaIEZANZOt5VZvry3gf9U0kPEv07JuN8OF65rgbyEe2uDDl3ZfpMtygzm5nFWyOGgNAAiKQ2TqpYi039HQo0LFrxcQiGn5y0pelpfpWVWDOcF948AXOWrjFFd-A9zlaUgR6D6HVyuJqaGfx1LP8t0HzFAgFAyHS4v4z53mN-HldCz2QwrfeLRgtfL-T3-iSFsNgpLDAaHcxMF_c3lfuLM8nuLp1_XtDZ5UPnOsqli-KGOSMwudeI"
             />
           </div>
-          <span className="text-2xl font-bold tracking-tighter text-white dark:text-indigo-100 font-headline">
+          <span className="text-2xl font-bold tracking-tighter text-white font-headline">
             CampusPrint
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex h-10 items-center justify-center gap-2 rounded-full bg-white/10 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/20 active:scale-95 duration-200"
-          >
-            <LogOut size={16} strokeWidth={2} />
-            Logout
-          </button>
+          <NotificationBell audience="student" userId={currentUser?.id} variant="dark" />
           <button
             type="button"
             onClick={() => navigate('/settings', { state: { from: '/home' } })}
-            className="w-10 h-10 flex items-center justify-center rounded-full text-white hover:bg-white/10 transition-colors active:scale-95 duration-200"
+            className="flex h-11 items-center gap-3 rounded-full bg-white/10 px-4 text-white transition-all hover:bg-white/20 active:scale-95 backdrop-blur-sm"
           >
-            <span className="material-symbols-outlined">settings</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
+              <UserRound size={16} strokeWidth={2.2} />
+            </div>
+            <div className="text-left leading-tight">
+              <div className="max-w-[10rem] truncate text-sm font-semibold">{displayName}</div>
+              <div className="max-w-[10rem] truncate text-[11px] text-white/75">{departmentLabel}</div>
+            </div>
           </button>
         </div>
       </header>
 
       <main className="px-6 mt-8 space-y-8">
-        {/* Greeting Section */}
-        <section className="space-y-2">
+        <section className="space-y-2 animate-fade-in-up">
           <h1 className="text-[2.5rem] leading-tight font-headline font-bold tracking-tight text-on-surface">
-            Good Morning, Alex 👋
+            {getGreeting()}, {displayName}
           </h1>
           <p className="text-on-surface-variant text-sm max-w-xs">
             Ready to organize your academic materials today?
           </p>
         </section>
 
-        {/* Search Bar */}
-        <section>
+        <section className="animate-fade-in-up" style={{ animationDelay: '60ms' }}>
           <div className="relative group">
             <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-              <span className="material-symbols-outlined" style={{ color: 'var(--clr-outline)' }}>
+              <span className="material-symbols-outlined text-on-surface-variant transition-colors group-focus-within:text-primary">
                 search
               </span>
             </div>
             <input
-              className="w-full h-14 pl-14 pr-6 border-none rounded-xl shadow-[0_10px_30px_rgba(32,48,68,0.04)] focus:ring-2 focus:ring-indigo-500/20 transition-all"
-              style={{ background: 'var(--clr-surface-container-lowest)' }}
-              placeholder="Search for books, forms, or records..."
+              className="w-full h-14 pl-14 pr-6 border-none rounded-2xl shadow-[0_10px_30px_rgba(32,48,68,0.04)] focus:ring-2 focus:ring-primary/30 focus:shadow-[0_10px_30px_rgba(74,64,224,0.08)] transition-all bg-surface-container-lowest text-on-surface placeholder:text-on-surface-variant/60"
+              placeholder="Search for books, forms, records, or xerox..."
               type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </section>
 
-        {/* Featured Banner (Bento Style) */}
-        <section className="grid grid-cols-1 gap-4">
+        <section className="animate-fade-in-up" style={{ animationDelay: '120ms' }}>
           <div
-            className="relative overflow-hidden rounded-xl h-48 flex flex-col justify-end p-6 group"
+            className="relative overflow-hidden rounded-2xl h-48 flex flex-col justify-end p-6 group cursor-pointer"
+            onClick={() => navigate('/order')}
             style={{ background: 'var(--clr-primary)' }}
           >
             <div className="absolute inset-0 opacity-20 transition-transform duration-700 group-hover:scale-110">
@@ -135,95 +376,132 @@ function HomePage() {
             </div>
             <div
               className="absolute inset-0"
-              style={{ background: 'linear-gradient(to top, rgba(74,64,224,0.9), transparent)' }}
+              style={{ background: 'linear-gradient(to top, rgba(74,64,224,0.92), rgba(74,64,224,0.3), transparent)' }}
             />
             <div className="relative z-10">
               <span
-                className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md"
+                className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md inline-block"
                 style={{ background: 'var(--clr-tertiary-container)', color: 'var(--clr-on-tertiary-container)' }}
               >
-                New Feature
+                Study Motivation
               </span>
               <h2 className="text-white text-xl font-bold font-headline mt-2">
-                Instant Lab Manuals
+                Keep showing up for yourself.
               </h2>
-              <p className="text-white/80 text-sm">Download and print in one tap.</p>
+              <p className="text-white/80 text-sm max-w-md">{featuredQuote}</p>
             </div>
           </div>
         </section>
 
-        {/* Services Grid */}
-        <section className="space-y-4">
+        <section className="space-y-4 animate-fade-in-up" style={{ animationDelay: '180ms' }}>
           <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold" style={{ color: 'var(--clr-on-surface)' }}>
+            <h3 className="text-lg font-bold text-on-surface font-headline">
               Main Services
             </h3>
-            <button className="text-sm font-semibold" style={{ color: 'var(--clr-primary)' }} onClick={() => navigate('/order')}>
+            <button
+              className="text-sm font-semibold text-primary hover:underline transition-all"
+              onClick={() => navigate('/order')}
+            >
               View All
             </button>
           </div>
           {pageError && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300">
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 animate-fade-in">
               {pageError}
             </div>
           )}
           {visibleServices.length === 0 ? (
-            <div
-              className="rounded-xl p-6 text-sm"
-              style={{ background: 'var(--clr-surface-container-lowest)', color: 'var(--clr-on-surface-variant)' }}
-            >
-              No active services are available right now.
+            <div className="rounded-2xl p-8 text-center bg-surface-container-lowest text-on-surface-variant animate-fade-in">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant/40 mb-3 block">
+                {searchQuery ? 'search_off' : 'inventory_2'}
+              </span>
+              <p className="font-headline font-bold text-on-surface mb-1">
+                {searchQuery ? 'No matching services' : 'No active services'}
+              </p>
+              <p className="text-sm">
+                {searchQuery
+                  ? `Nothing found for "${searchQuery}". Try a different term.`
+                  : 'No active services are available right now.'
+                }
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">
-              {visibleServices.map((service) => (
-                <button
+              {visibleServices.map((service, index) => (
+                <div
                   key={service.id}
-                  type="button"
-                  onClick={() => navigate('/order')}
-                  className="p-5 rounded-xl shadow-[0_10px_30px_rgba(32,48,68,0.03)] flex flex-col items-start gap-4 hover:opacity-90 transition-all active:scale-95 cursor-pointer text-left"
-                  style={{ background: 'var(--clr-surface-container-lowest)' }}
+                  className="card-interactive p-5 rounded-2xl shadow-[0_8px_24px_rgba(32,48,68,0.05)] flex flex-col items-start gap-4 text-left bg-surface-container-lowest"
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
                   <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center"
-                    style={{ background: service.background || 'var(--clr-surface-container-low)', color: service.color || 'var(--clr-primary)' }}
+                    className="w-12 h-12 rounded-full flex items-center justify-center transition-transform group-hover:scale-110"
+                    style={{
+                      background: service.background || 'var(--clr-surface-container-low)',
+                      color: service.color || 'var(--clr-primary)',
+                    }}
                   >
                     <span className="material-symbols-outlined text-3xl">{service.icon}</span>
                   </div>
                   <div>
-                    <span className="font-bold block" style={{ color: 'var(--clr-on-surface)' }}>
+                    <span className="font-bold block text-on-surface">
                       {service.name}
                     </span>
-                    <span className="text-xs" style={{ color: 'var(--clr-on-surface-variant)' }}>
-                      Available now
+                    <span className="text-xs text-on-surface-variant">
+                      {(documentsByService[service.id] || []).length > 0
+                        ? `${documentsByService[service.id].length} file${documentsByService[service.id].length > 1 ? 's' : ''} available`
+                        : 'Available now'}
                     </span>
                   </div>
-                </button>
+                  <div className="mt-auto flex w-full flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDocuments(service)}
+                      className="rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/20"
+                    >
+                      View Files
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/order')}
+                      className="rounded-full bg-surface-container-low px-3 py-2 text-xs font-semibold text-on-surface transition hover:bg-surface-container"
+                    >
+                      Custom Order
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           )}
         </section>
 
-        {/* Quick Summary Card */}
-        <section className="pb-10">
-          <div className="rounded-xl p-6 flex items-center gap-6" style={{ background: 'var(--clr-surface-container-low)' }}>
+        <section className="pb-10 animate-fade-in-up" style={{ animationDelay: '240ms' }}>
+          <div className="rounded-2xl p-6 flex items-center gap-6 bg-surface-container-low">
             <div className="flex-1 space-y-1">
-              <h4 className="text-lg font-bold" style={{ color: 'var(--clr-on-surface)' }}>
+              <h4 className="text-lg font-bold text-on-surface font-headline">
                 Current Status
               </h4>
-              <p className="text-xs" style={{ color: 'var(--clr-on-surface-variant)' }}>
+              <p className="text-xs text-on-surface-variant">
                 You have 2 pending orders ready for pickup at the Main Library Hub.
               </p>
             </div>
             <div
-              className="w-14 h-14 rounded-full flex items-center justify-center"
+              className="w-14 h-14 rounded-full flex items-center justify-center animate-[pulseGlow_2s_ease-in-out_infinite]"
               style={{ border: '4px solid var(--clr-primary)', borderTopColor: 'transparent' }}
             >
-              <span className="text-[10px] font-bold" style={{ color: 'var(--clr-primary)' }}>85%</span>
+              <span className="text-[10px] font-bold text-primary">85%</span>
             </div>
           </div>
         </section>
       </main>
+
+      <ServiceDocumentsSheet
+        isOpen={Boolean(activeService)}
+        service={activeService}
+        documents={activeService ? documentsByService[activeService.id] || [] : []}
+        isLoading={isDocumentsLoading}
+        onClose={handleCloseDocuments}
+        onAddToCart={(document) => handleAddDocumentToCart(activeService, document)}
+      />
 
       <div className="fixed bottom-0 left-0 z-50 w-full">
         <BottomNav />

@@ -1,18 +1,81 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ShoppingBag } from 'lucide-react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, FileText, ShoppingBag } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
 import CartSummary from '../components/CartSummary'
+import NotificationBell from '../components/NotificationBell'
 import { getCartItems } from '../api/cartApi'
 import { createOrder } from '../api/orderApi'
+import { clearLocalCartItems, getLocalCartItems, saveLocalCartItems } from '../lib/localCart'
+import { createPrototypeOrder } from '../lib/prototypeData'
+import { getStudentProfile } from '../lib/studentProfile'
 import { supabase } from '../lib/supabase'
+import { generateCode } from '../utils/generateCode'
+
+function mapCartItemToOrder(cartItem) {
+  return {
+    id: cartItem.id,
+    serviceId: cartItem.service_id || cartItem.serviceId,
+    serviceName: cartItem.services?.name || cartItem.serviceName || 'Printing Order',
+    pages: Number(cartItem.pages),
+    quantity: Number(cartItem.quantity),
+    pricePerPage: Number(cartItem.price_per_page ?? cartItem.pricePerPage),
+    totalPrice: Number(cartItem.total_price ?? cartItem.totalPrice),
+    printMode: cartItem.printMode || 'color',
+    printSides: cartItem.printSides || 'single',
+    paperSize: cartItem.paperSize || 'A4',
+    finishing: cartItem.finishing || 'none',
+    finishingCharge: Number(cartItem.finishingCharge || 0),
+    uploadedFiles: Array.isArray(cartItem.uploadedFiles) ? cartItem.uploadedFiles : [],
+    isServiceDocument: Boolean(cartItem.isServiceDocument),
+    documentTitle: cartItem.documentTitle || '',
+    documentUrl: cartItem.documentUrl || '',
+  }
+}
+
+function getFriendlyNetworkMessage(error, fallbackMessage) {
+  if (!error?.message) {
+    return fallbackMessage
+  }
+
+  if (error.message.toLowerCase().includes('failed to fetch')) {
+    return fallbackMessage
+  }
+
+  return error.message
+}
+
+function formatFinishingLabel(finishing) {
+  const labels = {
+    none: 'No finishing',
+    staple: 'Staple',
+    spiral: 'Spiral Bind',
+    lamination: 'Lamination',
+  }
+
+  return labels[finishing] || finishing
+}
+
+function formatUploadedFileName(file) {
+  if (!file) return ''
+  if (typeof file === 'string') return file
+  return file.name || 'Uploaded file'
+}
+
+function getStudentLabel(user) {
+  const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name
+  if (fullName) return fullName
+  if (user?.email) return user.email.split('@')[0]
+  return 'CampusPrint Student'
+}
 
 function CartPage() {
   const navigate = useNavigate()
-  const [order, setOrder] = useState(null)
+  const [cartItems, setCartItems] = useState([])
   const [pageError, setPageError] = useState('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [checkoutMessage, setCheckoutMessage] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
 
   useEffect(() => {
     async function loadCart() {
@@ -24,38 +87,66 @@ function CartPage() {
           return
         }
 
-        const cartItems = await getCartItems(data.user.id)
+        setCurrentUser(data.user)
+        const remoteCartItems = await getCartItems(data.user.id)
 
-        if (cartItems.length > 0) {
-          const latestItem = cartItems[0]
-
-          setOrder({
-            id: latestItem.id,
-            serviceId: latestItem.service_id,
-            serviceName: latestItem.services?.name || 'Printing Order',
-            pages: latestItem.pages,
-            quantity: latestItem.quantity,
-            pricePerPage: Number(latestItem.price_per_page),
-            totalPrice: Number(latestItem.total_price),
-          })
+        if (remoteCartItems.length > 0) {
+          const mappedItems = remoteCartItems.map(mapCartItemToOrder)
+          setCartItems(mappedItems)
+          saveLocalCartItems(mappedItems)
         } else {
-          setOrder(null)
+          setCartItems(getLocalCartItems())
         }
+
+        setPageError('')
       } catch (error) {
-        setPageError(error.message)
+        const localCartItems = getLocalCartItems()
+
+        if (localCartItems.length > 0) {
+          setCartItems(localCartItems)
+          setPageError('Using saved cart items because the backend is offline right now.')
+          return
+        }
+
+        setPageError(getFriendlyNetworkMessage(error, 'Could not load your cart because the backend is offline.'))
       }
     }
 
     loadCart()
   }, [navigate])
 
+  const itemCount = cartItems.length
+  const totalQuantity = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.quantity, 0),
+    [cartItems],
+  )
+  const totalPages = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.pages * item.quantity, 0),
+    [cartItems],
+  )
+  const totalPrice = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.totalPrice, 0),
+    [cartItems],
+  )
+
   const checkoutLabel = useMemo(() => {
-    if (!order) return 'No order selected'
-    return `${order.quantity} set${order.quantity > 1 ? 's' : ''} ready for checkout`
-  }, [order])
+    if (itemCount === 0) return 'No order selected'
+    return `${itemCount} item${itemCount > 1 ? 's' : ''} in cart`
+  }, [itemCount])
+
+  const handleRemoveItem = (indexToRemove) => {
+    setCartItems((current) => {
+      const nextItems = current.filter((_, index) => index !== indexToRemove)
+      saveLocalCartItems(nextItems)
+      return nextItems
+    })
+
+    setCheckoutMessage('')
+    setPageError('Cart updated successfully.')
+  }
 
   const handleCheckout = async () => {
-    if (!order?.serviceId) {
+    if (cartItems.length === 0) {
       setPageError('No cart item is available for checkout.')
       return
     }
@@ -69,20 +160,77 @@ function CartPage() {
         return
       }
 
-      await createOrder({
-        user_id: data.user.id,
-        student_name: data.user.email,
-        service_id: order.serviceId,
-        pages: order.pages,
-        quantity: order.quantity,
-        price_per_page: order.pricePerPage,
-        notes: 'Created from CampusPrint cart checkout',
-        file_urls: [],
-      })
-      setCheckoutMessage('Order created successfully. You can now review it from the admin dashboard queue.')
+      let usedPrototypeMode = false
+
+      for (const item of cartItems) {
+        try {
+          await createOrder({
+            user_id: data.user.id,
+            student_name: data.user.email,
+            service_id: item.serviceId,
+            service_name: item.serviceName,
+            pages: item.pages,
+            quantity: item.quantity,
+            price_per_page: item.pricePerPage,
+            notes: item.isServiceDocument
+              ? `Added from uploaded service documents | ${item.documentTitle || item.serviceName}`
+              : `Created from CampusPrint cart checkout | ${item.printMode === 'bw' ? 'Black & White' : 'Color'} | ${item.printSides === 'double' ? 'Double-sided' : 'Single-sided'} | ${item.paperSize} | ${item.finishing}`,
+            file_urls: item.uploadedFiles
+              .map((file) => file.publicUrl)
+              .filter(Boolean),
+          })
+        } catch {
+          usedPrototypeMode = true
+          createPrototypeOrder({
+            user_id: data.user.id,
+            student_name: data.user.email,
+            service_id: item.serviceId,
+            service_name: item.serviceName,
+            pages: item.pages,
+            quantity: item.quantity,
+            price_per_page: item.pricePerPage,
+            notes: item.isServiceDocument
+              ? `Added from uploaded service documents | ${item.documentTitle || item.serviceName}`
+              : `Created from CampusPrint cart checkout | ${item.printMode === 'bw' ? 'Black & White' : 'Color'} | ${item.printSides === 'double' ? 'Double-sided' : 'Single-sided'} | ${item.paperSize} | ${item.finishing}`,
+            file_urls: item.uploadedFiles
+              .map((file) => file.publicUrl)
+              .filter(Boolean),
+          })
+        }
+      }
+
+      clearLocalCartItems()
+      setCartItems([])
+      setCheckoutMessage(
+        usedPrototypeMode
+          ? 'Prototype order created. Admin has been notified, and the student bell will update when the order is marked ready.'
+          : 'Order created successfully. Check the bell icon for your latest order update.'
+      )
       setPageError('')
+
+      const uploadedFileNames = cartItems
+        .flatMap((item) => item.uploadedFiles || [])
+        .map((file) => formatUploadedFileName(file))
+        .filter(Boolean)
+      const savedStudentProfile = getStudentProfile()
+
+      navigate('/success', {
+        state: {
+          name: savedStudentProfile.name || getStudentLabel(data.user),
+          dept:
+            savedStudentProfile.department ||
+            data.user?.user_metadata?.department ||
+            data.user?.user_metadata?.dept ||
+            'Department not set',
+          file:
+            uploadedFileNames.length > 0
+              ? uploadedFileNames.join(', ')
+              : `${itemCount} item${itemCount > 1 ? 's' : ''} from cart`,
+          code: generateCode(),
+        },
+      })
     } catch (error) {
-      setPageError(error.message)
+      setPageError(getFriendlyNetworkMessage(error, 'Checkout could not start. Please try again.'))
     } finally {
       setIsCheckingOut(false)
     }
@@ -90,7 +238,7 @@ function CartPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(151,149,255,0.18),_transparent_34%),_var(--clr-surface)] font-body text-on-surface antialiased">
-      <header className="sticky top-0 z-40 border-b border-white/20 bg-gradient-to-r from-indigo-600 via-indigo-500 to-sky-500 shadow-[0_16px_36px_rgba(32,48,68,0.12)] backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-white/20 bg-gradient-to-r from-[var(--clr-primary)] via-[var(--clr-primary-dim)] to-[var(--clr-secondary)] shadow-[0_16px_36px_rgba(32,48,68,0.12)] backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <button
@@ -108,6 +256,9 @@ function CartPage() {
               </h1>
             </div>
           </div>
+          <div className="hidden sm:flex sm:items-center sm:gap-3">
+            <NotificationBell audience="student" userId={currentUser?.id} variant="dark" />
+          </div>
         </div>
       </header>
 
@@ -116,24 +267,34 @@ function CartPage() {
           <div className="space-y-6">
             <section className="overflow-hidden rounded-[2rem] border border-white/30 bg-surface-container-lowest shadow-[0_24px_48px_rgba(32,48,68,0.08)]">
               <div className="border-b border-outline-variant/20 bg-gradient-to-br from-primary/10 to-secondary-container/25 p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                    <ShoppingBag size={22} strokeWidth={1.8} />
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <ShoppingBag size={22} strokeWidth={1.8} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">
+                        Selected Order
+                      </p>
+                      <h2 className="mt-1 font-headline text-2xl font-bold text-on-surface">
+                        {itemCount > 0 ? `${itemCount} item${itemCount > 1 ? 's' : ''} in cart` : 'No item in cart'}
+                      </h2>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">
-                      Selected Order
-                    </p>
-                    <h2 className="mt-1 font-headline text-2xl font-bold text-on-surface">
-                      {order?.serviceName || 'No item in cart'}
-                    </h2>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/order')}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-[0_10px_20px_rgba(74,64,224,0.22)] transition-all hover:bg-primary-dim active:scale-95"
+                    aria-label="Add more items"
+                  >
+                    <span className="material-symbols-outlined">add</span>
+                  </button>
                 </div>
               </div>
 
               <div className="space-y-4 p-5 sm:p-6">
                 {pageError && (
-                  <div className="rounded-[1.5rem] bg-error-container/10 p-4 text-sm text-error">
+                  <div className="rounded-[1.5rem] bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300">
                     {pageError}
                   </div>
                 )}
@@ -142,33 +303,97 @@ function CartPage() {
                     {checkoutMessage}
                   </div>
                 )}
-                {order ? (
+                {itemCount > 0 ? (
                   <>
                     <div className="grid gap-4 sm:grid-cols-3">
                       <div className="rounded-[1.5rem] bg-surface-container-low p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-on-surface-variant">
-                          Quantity
+                          Items
                         </p>
                         <p className="mt-2 font-headline text-2xl font-bold text-on-surface">
-                          {order.quantity}
+                          {itemCount}
                         </p>
                       </div>
                       <div className="rounded-[1.5rem] bg-surface-container-low p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-on-surface-variant">
-                          Pages
+                          Total Qty
                         </p>
                         <p className="mt-2 font-headline text-2xl font-bold text-on-surface">
-                          {order.pages}
+                          {totalQuantity}
                         </p>
                       </div>
                       <div className="rounded-[1.5rem] bg-surface-container-low p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-on-surface-variant">
-                          Price/Page
+                          Total Pages
                         </p>
                         <p className="mt-2 font-headline text-2xl font-bold text-on-surface">
-                          Rs {order.pricePerPage}
+                          {totalPages}
                         </p>
                       </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {cartItems.map((item, index) => (
+                        <div key={`${item.id}-${index}`} className="rounded-[1.5rem] bg-surface-container-low p-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-headline text-lg font-bold text-on-surface">
+                                {item.serviceName}
+                              </p>
+                              {item.isServiceDocument ? (
+                                <>
+                                  <p className="mt-1 text-sm text-on-surface-variant">
+                                    Ready from uploaded service files
+                                  </p>
+                                  <p className="mt-1 text-xs text-on-surface-variant">
+                                    Instant document add-on • No custom print setup needed
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="mt-1 text-sm text-on-surface-variant">
+                                    {item.quantity} qty x {item.pages} pages x Rs {item.pricePerPage}
+                                  </p>
+                                  <p className="mt-1 text-xs text-on-surface-variant">
+                                    {item.printMode === 'bw' ? 'Black & White' : 'Color'} • {item.printSides === 'double' ? 'Double-sided' : 'Single-sided'} • {item.paperSize} • {formatFinishingLabel(item.finishing)}
+                                  </p>
+                                </>
+                              )}
+                              {item.uploadedFiles?.length > 0 && (
+                                <div className="mt-3 rounded-2xl bg-surface-container px-3 py-3">
+                                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-on-surface-variant">
+                                    <FileText size={14} strokeWidth={2} />
+                                    Uploaded Documents
+                                  </div>
+                                  <div className="space-y-2">
+                                    {item.uploadedFiles.map((file, fileIndex) => (
+                                      <div
+                                        key={`${formatUploadedFileName(file)}-${fileIndex}`}
+                                        className="rounded-xl bg-surface-container-high px-3 py-2 text-sm text-on-surface"
+                                      >
+                                        {formatUploadedFileName(file)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col items-end gap-3">
+                              <p className="font-headline text-xl font-extrabold text-primary">
+                                Rs {item.totalPrice.toFixed(2)}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(index)}
+                                className="flex h-9 w-9 items-center justify-center rounded-full bg-error-container/15 text-error transition-all hover:bg-error-container/25 active:scale-95"
+                                aria-label={`Remove ${item.serviceName}`}
+                              >
+                                <span className="material-symbols-outlined text-[20px]">close</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
 
                     <div className="rounded-[1.5rem] bg-surface-container-low p-5">
@@ -177,7 +402,7 @@ function CartPage() {
                         {checkoutLabel}
                       </p>
                       <p className="mt-2 text-sm text-on-surface-variant">
-                        Review the summary and continue to complete your printing order.
+                        Every item you add in this prototype is now shown here before checkout.
                       </p>
                     </div>
                   </>
@@ -202,13 +427,29 @@ function CartPage() {
             </section>
           </div>
 
-          {order && (
+          {itemCount > 0 && (
             <aside className="lg:sticky lg:top-28">
               <CartSummary
-                pricePerPage={order.pricePerPage}
-                pages={order.pages}
-                quantity={order.quantity}
-                totalPrice={order.totalPrice}
+                pricePerPage={itemCount > 0 ? cartItems[0].pricePerPage : 0}
+                pages={totalPages}
+                quantity={totalQuantity}
+                totalPrice={totalPrice}
+                summaryRows={
+                  itemCount > 0
+                    ? cartItems[0].isServiceDocument
+                      ? [
+                          { label: 'Item Type', value: 'Uploaded Service File' },
+                          { label: 'Documents', value: `${itemCount}` },
+                          { label: 'Access', value: 'Added from service list' },
+                        ]
+                      : [
+                          { label: 'Print Type', value: cartItems[0].printMode === 'bw' ? 'Black & White' : 'Color' },
+                          { label: 'Sides', value: cartItems[0].printSides === 'double' ? 'Double-sided' : 'Single-sided' },
+                          { label: 'Paper Size', value: cartItems[0].paperSize },
+                          { label: 'Finishing', value: cartItems[0].finishing === 'none' ? 'None' : cartItems[0].finishing },
+                        ]
+                    : []
+                }
                 buttonLabel={isCheckingOut ? 'Processing...' : 'Checkout'}
                 onAction={handleCheckout}
               />
@@ -225,3 +466,4 @@ function CartPage() {
 }
 
 export default CartPage
+
