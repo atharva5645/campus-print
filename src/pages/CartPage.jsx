@@ -30,6 +30,9 @@ function mapCartItemToOrder(cartItem) {
     isServiceDocument: Boolean(cartItem.isServiceDocument),
     documentTitle: cartItem.documentTitle || '',
     documentUrl: cartItem.documentUrl || '',
+    linkedOrderId: cartItem.linkedOrderId || '',
+    linkedOrderStatus: cartItem.linkedOrderStatus || '',
+    orderCreatedFromCart: Boolean(cartItem.orderCreatedFromCart),
   }
 }
 
@@ -163,6 +166,10 @@ function CartPage() {
       let usedPrototypeMode = false
 
       for (const item of cartItems) {
+        if (item.linkedOrderId) {
+          continue
+        }
+
         try {
           await createOrder({
             user_id: data.user.id,
@@ -202,7 +209,9 @@ function CartPage() {
       clearLocalCartItems()
       setCartItems([])
       setCheckoutMessage(
-        usedPrototypeMode
+        cartItems.some((item) => item.linkedOrderId)
+          ? 'Order confirmed successfully. Your queued print jobs are already visible on the admin dashboard.'
+          : usedPrototypeMode
           ? 'Prototype order created. Admin has been notified, and the student bell will update when the order is marked ready.'
           : 'Order created successfully. Check the bell icon for your latest order update.'
       )

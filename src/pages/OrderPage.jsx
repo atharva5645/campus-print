@@ -7,9 +7,11 @@ import NotificationBell from '../components/NotificationBell'
 import OrderForm from '../components/OrderForm'
 import { getServices } from '../api/adminApi'
 import { addCartItem } from '../api/cartApi'
+import { createOrder } from '../api/orderApi'
 import { uploadOrderFile } from '../api/uploadApi'
 import { addLocalCartItem } from '../lib/localCart'
 import { getLocalServices, getStudentSafeServices, syncLocalServices } from '../lib/localServices'
+import { createPrototypeOrder } from '../lib/prototypeData'
 import { supabase } from '../lib/supabase'
 
 const PRICE_PER_PAGE = 2.5
@@ -176,9 +178,34 @@ function OrderPage() {
         })),
       }
 
-      addLocalCartItem(localCartItem)
+      const orderPayload = {
+        user_id: data.user.id,
+        student_name: data.user.email,
+        service_id: selectedService.id,
+        service_name: selectedService.name,
+        pages,
+        quantity,
+        price_per_page: pricePerPage,
+        notes: `Created from CampusPrint add to cart | ${printMode === 'bw' ? 'Black & White' : 'Color'} | ${printSides === 'double' ? 'Double-sided' : 'Single-sided'} | ${paperSize} | ${finishing}`,
+        file_urls: localCartItem.uploadedFiles.map((file) => file.publicUrl).filter(Boolean),
+      }
 
       let apiWarning = ''
+
+      try {
+        const createdOrder = await createOrder(orderPayload)
+        localCartItem.linkedOrderId = createdOrder.id
+        localCartItem.linkedOrderStatus = createdOrder.status || 'pending'
+        localCartItem.orderCreatedFromCart = true
+      } catch {
+        const prototypeOrder = createPrototypeOrder(orderPayload)
+        localCartItem.linkedOrderId = prototypeOrder.id
+        localCartItem.linkedOrderStatus = prototypeOrder.status || 'pending'
+        localCartItem.orderCreatedFromCart = true
+        apiWarning = 'Added to cart and queued for admin in prototype mode.'
+      }
+
+      addLocalCartItem(localCartItem)
 
       try {
         await addCartItem({
@@ -189,7 +216,7 @@ function OrderPage() {
           price_per_page: pricePerPage,
         })
       } catch {
-        apiWarning = 'Added to cart in prototype mode. Backend sync is unavailable right now.'
+        apiWarning = apiWarning || 'Added to cart. Backend cart sync is unavailable right now, but the print job is already queued.'
       }
 
       setPageError(apiWarning)

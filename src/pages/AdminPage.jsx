@@ -173,6 +173,10 @@ function AdminPage() {
   const inventoryRef = useRef(null)
 
   const mappedJobs = useMemo(() => mapJobs(jobs), [jobs])
+  const openJobsCount = useMemo(
+    () => jobs.filter((job) => !['completed', 'cancelled'].includes((job.status || '').toLowerCase())).length,
+    [jobs]
+  )
 
   const filteredJobs = useMemo(() => {
     if (jobFilter === 'all') return mappedJobs
@@ -635,7 +639,7 @@ function AdminPage() {
             <button className={`admin-nav-item${activeSection === 'jobs' ? ' active' : ''}`} type="button" onClick={() => scrollToSection('jobs')}>
               <span className="material-symbols-outlined">print</span>
               Print Jobs
-              <span className="admin-nav-badge">{filteredJobs.length}</span>
+              <span className="admin-nav-badge">{openJobsCount}</span>
             </button>
             <button className={`admin-nav-item${activeSection === 'inventory' ? ' active' : ''}`} type="button" onClick={() => scrollToSection('inventory')}>
               <span className="material-symbols-outlined">inventory_2</span>
@@ -699,29 +703,11 @@ function AdminPage() {
 
               <section className="admin-stat-row">
                 <div className="admin-stat-mini">
-                  <div className="admin-stat-mini-icon" style={{ background: '#e8f7ef' }}>
-                    <span className="material-symbols-outlined" style={{ color: '#006947' }}>check_circle</span>
-                  </div>
-                  <div>
-                    <div className="admin-stat-mini-val">94%</div>
-                    <div className="admin-stat-mini-lbl">Success rate</div>
-                  </div>
-                </div>
-                <div className="admin-stat-mini">
-                  <div className="admin-stat-mini-icon" style={{ background: '#eef2ff' }}>
-                    <span className="material-symbols-outlined" style={{ color: '#4a40e0' }}>schedule</span>
-                  </div>
-                  <div>
-                    <div className="admin-stat-mini-val">18m</div>
-                    <div className="admin-stat-mini-lbl">Avg turnaround</div>
-                  </div>
-                </div>
-                <div className="admin-stat-mini">
                   <div className="admin-stat-mini-icon" style={{ background: '#fff1f4' }}>
                     <span className="material-symbols-outlined" style={{ color: '#b41340' }}>warning</span>
                   </div>
                   <div>
-                    <div className="admin-stat-mini-val">{stats.openAlerts}</div>
+                    <div className="admin-stat-mini-val">{openJobsCount}</div>
                     <div className="admin-stat-mini-lbl">Open jobs</div>
                   </div>
                 </div>
