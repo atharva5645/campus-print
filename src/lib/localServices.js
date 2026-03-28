@@ -44,11 +44,35 @@ function normalizeServices(services) {
     return defaultServices
   }
 
-  return services.map((service) => ({
+  const normalizedList = services.map((service) => ({
     ...service,
     background: service.background || service.bg || '#eef2ff',
     color: service.color || '#4a40e0',
   }))
+
+  const uniqueMap = new Map()
+  for (const item of normalizedList) {
+    const nameKey = String(item.name || '').trim().toLowerCase()
+    const idKey = item.id ? String(item.id) : ''
+    const key = nameKey || idKey
+    if (!key) continue
+    
+    const existing = uniqueMap.get(key)
+    if (!existing) {
+      uniqueMap.set(key, item)
+    } else {
+      // Priority to retain id from real backend over local- mock id
+      const mergedId = (existing.id && !String(existing.id).startsWith('local-')) 
+        ? existing.id 
+        : (item.id && !String(item.id).startsWith('local-'))
+          ? item.id
+          : existing.id || item.id
+
+      uniqueMap.set(key, { ...existing, ...item, id: mergedId })
+    }
+  }
+
+  return Array.from(uniqueMap.values())
 }
 
 function hasEnabledService(services) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
@@ -13,6 +13,7 @@ import { addLocalCartItem } from '../lib/localCart'
 import { getLocalServices, getStudentSafeServices, syncLocalServices } from '../lib/localServices'
 import { createPrototypeOrder } from '../lib/prototypeData'
 import { supabase } from '../lib/supabase'
+import { generateCode } from '../utils/generateCode'
 
 const PRICE_PER_PAGE = 2.5
 const PRINT_MODE_PRICING = {
@@ -65,6 +66,17 @@ function getFinishingLabel(finishingOption, finishingPrice) {
   return `${baseLabel} (+Rs ${finishingPrice})`
 }
 
+function getPreferredService(candidateServices) {
+  const safeServices = getStudentSafeServices(candidateServices)
+
+  return (
+    safeServices.find((service) => service.name === 'Color Printing' && service.enabled) ||
+    safeServices.find((service) => service.enabled) ||
+    safeServices[0] ||
+    null
+  )
+}
+
 function OrderPage() {
   const navigate = useNavigate()
   const [quantity, setQuantity] = useState(1)
@@ -73,7 +85,7 @@ function OrderPage() {
   const [printSides, setPrintSides] = useState('single')
   const [paperSize, setPaperSize] = useState('A4')
   const [finishing, setFinishing] = useState('none')
-  const [selectedService, setSelectedService] = useState(null)
+  const [selectedService, setSelectedService] = useState(() => getPreferredService(getLocalServices()))
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [pageError, setPageError] = useState('')
@@ -113,23 +125,10 @@ function OrderPage() {
 
         const services = await getServices()
         syncLocalServices(services)
-        const studentServices = getStudentSafeServices(services)
-        const preferredService =
-          studentServices.find((service) => service.name === 'Color Printing' && service.enabled) ||
-          studentServices.find((service) => service.enabled) ||
-          studentServices[0] ||
-          null
-
-        setSelectedService(preferredService)
+        setSelectedService(getPreferredService(services))
         setPageError('')
       } catch {
-        const localServices = getStudentSafeServices(getLocalServices())
-        const preferredService =
-          localServices.find((service) => service.name === 'Color Printing' && service.enabled) ||
-          localServices.find((service) => service.enabled) ||
-          null
-
-        setSelectedService(preferredService)
+        setSelectedService(getPreferredService(getLocalServices()))
         setPageError('Using locally saved prototype services for now.')
       }
     }
@@ -160,6 +159,7 @@ function OrderPage() {
 
       const localCartItem = {
         id: `local-${Date.now()}`,
+        uniqueCode: generateCode(),
         serviceId: selectedService.id,
         serviceName: selectedService.name,
         pages,
@@ -404,3 +404,5 @@ function OrderPage() {
 }
 
 export default OrderPage
+
+

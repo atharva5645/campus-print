@@ -1,4 +1,9 @@
-import { apiFetch } from './client'
+﻿import { apiFetch } from './client'
+
+export function getOrders(userId) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  return apiFetch(`/api/orders${query}`)
+}
 
 export function createOrder(payload) {
   return apiFetch('/api/orders', {
@@ -13,3 +18,11 @@ export function updateOrderStatus(id, status) {
     body: JSON.stringify({ status }),
   })
 }
+
+export function updateOrderCollected(id, collected) {
+  return apiFetch(`/api/orders/${id}/collect`, {
+    method: 'PATCH',
+    body: JSON.stringify({ collected }),
+  })
+}
+

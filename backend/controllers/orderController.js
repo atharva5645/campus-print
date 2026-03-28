@@ -1,7 +1,42 @@
-import supabase from '../config/supabaseClient.js'
+﻿import supabase from '../config/supabaseClient.js'
 import { createNotifications } from '../lib/notificationStore.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { createHttpError } from '../utils/httpError.js'
+
+const PRINT_STATUS_VALUES = ['pending', 'printing_in_progress', 'ready_for_pickup', 'distributed']
+
+function isValidPrintStatus(status) {
+  return PRINT_STATUS_VALUES.includes(status)
+}
+
+function toLegacyStatus(printStatus) {
+  const map = {
+    pending: 'pending',
+    printing_in_progress: 'processing',
+    ready_for_pickup: 'completed',
+    distributed: 'completed',
+  }
+
+  return map[printStatus] || 'pending'
+}
+
+function getPrintStatus(order) {
+  return order?.print_status || order?.status || 'pending'
+}
+
+function formatDeadlineLabel(value) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return ''
+  }
+
+  return parsed.toLocaleString([], {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 async function ensureProfileExists(userId, studentName = null) {
   if (!userId) {
@@ -64,6 +99,7 @@ async function createOrderNotifications({ order, serviceName, studentLabel }) {
     serviceName,
     pages: Number(order.pages),
   })
+  const deadlineLabel = formatDeadlineLabel(order.deadline)
 
   await createNotifications([
     {
@@ -72,7 +108,9 @@ async function createOrderNotifications({ order, serviceName, studentLabel }) {
       order_id: order.id,
       type: 'order_created',
       title: 'Your order is getting ready',
-      message: `Your order for ${summary} has been received and is getting ready.`,
+      message: deadlineLabel
+        ? `Your order for ${summary} has been received. Upload payment before ${deadlineLabel}.`
+        : `Your order for ${summary} has been received and is getting ready.`,
     },
     {
       audience: 'admin',
@@ -95,12 +133,15 @@ async function createStatusNotification({ order, serviceName }) {
     pages: Number(order.pages),
   })
 
+  const currentPrintStatus = getPrintStatus(order)
+  const pickupDeadlineLabel = formatDeadlineLabel(new Date(new Date(order.updated_at || Date.now()).getTime() + 60 * 60 * 1000))
   const statusMessages = {
     pending: `Your order for ${summary} has been queued.`,
-    in_review: `Your order for ${summary} is now under review.`,
-    processing: `Your order for ${summary} is getting ready.`,
-    completed: `Your order for ${summary} is ready for pickup.`,
-    cancelled: `Your order for ${summary} was cancelled. Please contact the print room if needed.`,
+    printing_in_progress: `Your order for ${summary} is now printing.`,
+    ready_for_pickup: pickupDeadlineLabel
+      ? `Your order for ${summary} is ready for pickup. Collect it before ${pickupDeadlineLabel} or it will be terminated.`
+      : `Your order for ${summary} is ready for pickup. Collect it within 1 hour or it will be terminated.`,
+    distributed: `Your order for ${summary} has been distributed successfully.`,
   }
 
   await createNotifications([
@@ -110,19 +151,26 @@ async function createStatusNotification({ order, serviceName }) {
       order_id: order.id,
       type: 'order_status',
       title: 'Order status updated',
-      message: statusMessages[order.status] || `Your order for ${summary} was updated.`,
+      message: statusMessages[currentPrintStatus] || `Your order for ${summary} was updated.`,
     },
   ])
 }
 
 export const getOrders = asyncHandler(async (req, res) => {
-  const { data, error } = await supabase
+  const { user_id } = req.query
+  let query = supabase
     .from('orders')
     .select(`
       *,
       services(name, icon)
     `)
     .order('created_at', { ascending: false })
+
+  if (user_id) {
+    query = query.eq('user_id', user_id)
+  }
+
+  const { data, error } = await query
 
   if (error) throw createHttpError(500, 'Failed to fetch orders', error)
 
@@ -148,6 +196,7 @@ export const createOrder = asyncHandler(async (req, res) => {
   await ensureProfileExists(user_id, student_name)
 
   const total_price = Number(pages) * Number(quantity) * Number(price_per_page)
+  const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
   const payload = {
     user_id,
@@ -158,6 +207,10 @@ export const createOrder = asyncHandler(async (req, res) => {
     total_price,
     notes,
     file_urls,
+    deadline,
+    print_status: 'pending',
+    collected: false,
+    collected_at: null,
     status: 'pending',
   }
 
@@ -194,9 +247,24 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     throw createHttpError(400, 'status is required')
   }
 
+  if (!isValidPrintStatus(status)) {
+    throw createHttpError(400, `status must be one of: ${PRINT_STATUS_VALUES.join(', ')}`)
+  }
+
+  const updates = {
+    print_status: status,
+    status: toLegacyStatus(status),
+    updated_at: new Date().toISOString(),
+  }
+
+  if (status === 'distributed') {
+    updates.collected = true
+    updates.collected_at = new Date().toISOString()
+  }
+
   const { data, error } = await supabase
     .from('orders')
-    .update({ status, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', id)
     .select(`
       *,
@@ -211,6 +279,59 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     serviceName: data.services?.name || 'printing order',
   }).catch((notificationError) => {
     console.warn('Failed to create order status notification', notificationError)
+  })
+
+  res.json(data)
+})
+
+export const updateOrderCollected = asyncHandler(async (req, res) => {
+  const { id } = req.params
+  const { collected } = req.body
+
+  if (typeof collected !== 'boolean') {
+    throw createHttpError(400, 'collected must be a boolean')
+  }
+
+  const { data: existingOrder, error: existingOrderError } = await supabase
+    .from('orders')
+    .select('id, print_status, status')
+    .eq('id', id)
+    .single()
+
+  if (existingOrderError) {
+    throw createHttpError(500, 'Failed to load order before updating collection status', existingOrderError)
+  }
+
+  const currentPrintStatus = getPrintStatus(existingOrder)
+  const nextPrintStatus = collected
+    ? 'distributed'
+    : currentPrintStatus === 'distributed'
+    ? 'ready_for_pickup'
+    : currentPrintStatus
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update({
+      collected,
+      collected_at: collected ? new Date().toISOString() : null,
+      print_status: nextPrintStatus,
+      status: toLegacyStatus(nextPrintStatus),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select(`
+      *,
+      services(name)
+    `)
+    .single()
+
+  if (error) throw createHttpError(500, 'Failed to update collected status', error)
+
+  createStatusNotification({
+    order: data,
+    serviceName: data.services?.name || 'printing order',
+  }).catch((notificationError) => {
+    console.warn('Failed to create order collection notification', notificationError)
   })
 
   res.json(data)

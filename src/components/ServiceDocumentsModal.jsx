@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
-
-function extractStoragePath(fileUrl) {
-  const marker = '/storage/v1/object/public/documents/'
-  const markerIndex = fileUrl.indexOf(marker)
-  if (markerIndex === -1) return null
-  return decodeURIComponent(fileUrl.slice(markerIndex + marker.length))
-}
+import { deleteDocument, getDocuments, uploadDocument } from '../api/documentApi'
 
 function formatDate(value) {
   if (!value) return ''
@@ -60,13 +53,7 @@ function ServiceDocumentsModal({ isOpen, mode, service, onClose }) {
       try {
         setIsLoadingDocuments(true)
         setError('')
-        const { data, error: fetchError } = await supabase
-          .from('documents')
-          .select('id, service_id, title, file_url, created_at')
-          .eq('service_id', service.id)
-          .order('created_at', { ascending: false })
-
-        if (fetchError) throw fetchError
+        const data = await getDocuments(service.id)
         if (active) setDocuments(data || [])
       } catch (loadError) {
         if (active) {
@@ -104,40 +91,14 @@ function ServiceDocumentsModal({ isOpen, mode, service, onClose }) {
       setError('')
       setMessage('')
 
-      const safeFileName = `${Date.now()}-${selectedFile.name.replace(/\s+/g, '-')}`
-      const storagePath = `service-${service.id}/${safeFileName}`
+      const insertedDocument = await uploadDocument({
+        serviceId: service.id,
+        title: title.trim(),
+        file: selectedFile,
+      })
 
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .upload(storagePath, selectedFile, {
-          cacheControl: '3600',
-          upsert: false,
-        })
-
-      if (storageError) throw storageError
-
-      const { data: publicUrlData } = supabase.storage
-        .from('documents')
-        .getPublicUrl(storagePath)
-
-      const fileUrl = publicUrlData.publicUrl
-
-      const { data: insertedRows, error: insertError } = await supabase
-        .from('documents')
-        .insert({
-          service_id: service.id,
-          title: title.trim(),
-          file_url: fileUrl,
-        })
-        .select('id, service_id, title, file_url, created_at')
-
-      if (insertError) {
-        await supabase.storage.from('documents').remove([storagePath])
-        throw insertError
-      }
-
-      if (insertedRows?.[0]) {
-        setDocuments((current) => [insertedRows[0], ...current])
+      if (insertedDocument) {
+        setDocuments((current) => [insertedDocument, ...current])
       }
 
       setTitle('')
@@ -150,7 +111,7 @@ function ServiceDocumentsModal({ isOpen, mode, service, onClose }) {
     }
   }
 
-  async function handleDelete(documentId, fileUrl) {
+  async function handleDelete(documentId) {
     const confirmed = window.confirm('Delete this document?')
     if (!confirmed) return
 
@@ -159,22 +120,7 @@ function ServiceDocumentsModal({ isOpen, mode, service, onClose }) {
       setError('')
       setMessage('')
 
-      const storagePath = extractStoragePath(fileUrl)
-
-      if (storagePath) {
-        const { error: storageError } = await supabase.storage
-          .from('documents')
-          .remove([storagePath])
-
-        if (storageError) throw storageError
-      }
-
-      const { error: deleteError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', documentId)
-
-      if (deleteError) throw deleteError
+      await deleteDocument(documentId)
 
       setDocuments((current) => current.filter((document) => document.id !== documentId))
       setMessage('Document deleted successfully.')
@@ -290,7 +236,7 @@ function ServiceDocumentsModal({ isOpen, mode, service, onClose }) {
                       </a>
                       <button
                         type="button"
-                        onClick={() => handleDelete(document.id, document.file_url)}
+                        onClick={() => handleDelete(document.id)}
                         disabled={deletingId === document.id}
                         className="inline-flex items-center justify-center rounded-xl bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                       >

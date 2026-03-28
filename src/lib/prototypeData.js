@@ -1,4 +1,4 @@
-function canUseStorage() {
+﻿function canUseStorage() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
 }
 
@@ -32,8 +32,37 @@ function buildOrderLabel(order) {
   return `${quantity} ${serviceName}${quantity > 1 ? ' sets' : ''} (${pages} ${pages === 1 ? 'page' : 'pages'} each)`
 }
 
+function formatDeadlineLabel(value) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return ''
+  }
+
+  return parsed.toLocaleString([], {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+function normalizePrintStatus(status) {
+  const legacyMap = {
+    pending: 'pending',
+    processing: 'printing_in_progress',
+    completed: 'ready_for_pickup',
+  }
+
+  return legacyMap[status] || status || 'pending'
+}
+
 export function getPrototypeOrders() {
-  return readJson(ORDER_KEY)
+  return readJson(ORDER_KEY).map((order) => ({
+    ...order,
+    print_status: normalizePrintStatus(order.print_status || order.status),
+    deadline: order.deadline || null,
+    collected: Boolean(order.collected),
+    collected_at: order.collected_at || null,
+  }))
 }
 
 export function savePrototypeOrders(orders) {
@@ -109,6 +138,10 @@ export function createPrototypeOrder(payload) {
     notes: payload.notes || null,
     file_urls: payload.file_urls || [],
     status: 'pending',
+    print_status: 'pending',
+    deadline: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    collected: false,
+    collected_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     services: {
@@ -145,7 +178,10 @@ export function updatePrototypeOrderStatus(orderId, status) {
 
     updatedOrder = {
       ...order,
-      status,
+      status: status === 'pending' ? 'pending' : status === 'printing_in_progress' ? 'processing' : 'completed',
+      print_status: status,
+      collected: status === 'distributed' ? true : order.collected,
+      collected_at: status === 'distributed' ? new Date().toISOString() : order.collected_at,
       updated_at: new Date().toISOString(),
     }
 
@@ -154,7 +190,7 @@ export function updatePrototypeOrderStatus(orderId, status) {
 
   savePrototypeOrders(nextOrders)
 
-  if (updatedOrder && status === 'completed') {
+  if (updatedOrder && status === 'ready_for_pickup') {
     const label = buildOrderLabel(updatedOrder)
     addPrototypeNotification({
       audience: 'student',
@@ -168,8 +204,35 @@ export function updatePrototypeOrderStatus(orderId, status) {
   return updatedOrder
 }
 
+export function updatePrototypeOrderCollected(orderId, collected) {
+  let updatedOrder = null
+  const nextOrders = getPrototypeOrders().map((order) => {
+    if (order.id !== orderId) return order
+
+    const nextPrintStatus = collected
+      ? 'distributed'
+      : order.print_status === 'distributed'
+      ? 'ready_for_pickup'
+      : order.print_status
+
+    updatedOrder = {
+      ...order,
+      status: nextPrintStatus === 'pending' ? 'pending' : nextPrintStatus === 'printing_in_progress' ? 'processing' : 'completed',
+      print_status: nextPrintStatus,
+      collected,
+      collected_at: collected ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    }
+
+    return updatedOrder
+  })
+
+  savePrototypeOrders(nextOrders)
+  return updatedOrder
+}
+
 export function clearCompletedPrototypeOrders() {
-  const remainingOrders = getPrototypeOrders().filter((order) => order.status !== 'completed')
+  const remainingOrders = getPrototypeOrders().filter((order) => order.print_status !== 'distributed')
   savePrototypeOrders(remainingOrders)
   return remainingOrders
 }
@@ -178,6 +241,9 @@ export function getPrototypeStats() {
   const orders = getPrototypeOrders()
   return {
     todayJobs: orders.length,
-    openAlerts: orders.filter((order) => order.status !== 'completed').length,
+    openAlerts: orders.filter((order) => order.print_status !== 'distributed').length,
   }
 }
+
+
+

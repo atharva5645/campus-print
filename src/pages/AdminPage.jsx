@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './AdminPage.css'
 import {
@@ -11,14 +11,18 @@ import {
   updateService,
 } from '../api/adminApi'
 import { getLocalServices, saveLocalServices, syncLocalServices } from '../lib/localServices'
-import { updateOrderStatus } from '../api/orderApi'
+import { updateOrderCollected, updateOrderStatus } from '../api/orderApi'
 import NotificationBell from '../components/NotificationBell'
+import DeadlineReminder from '../components/DeadlineReminder'
+import OrderStatusManager from '../components/OrderStatusManager'
 import ServiceDocumentsModal from '../components/ServiceDocumentsModal'
+import { getShopOpenStatus, saveShopOpenStatus } from '../lib/shopStatus'
 import { supabase } from '../lib/supabase'
 import {
   clearCompletedPrototypeOrders,
   getPrototypeOrders,
   getPrototypeStats,
+  updatePrototypeOrderCollected,
   updatePrototypeOrderStatus,
 } from '../lib/prototypeData'
 
@@ -111,24 +115,37 @@ async function deleteSupabaseService(id) {
   if (error) throw error
 }
 
+function getPrintStatus(job) {
+  const legacyMap = {
+    processing: 'printing_in_progress',
+    completed: 'ready_for_pickup',
+  }
+
+  return job.print_status || legacyMap[job.status] || job.status || 'pending'
+}
+
+function getPrintStatusMeta(status) {
+  const statusMap = {
+    pending: { label: 'Pending', bg: '#eef2ff', color: '#4a40e0', icon: 'schedule' },
+    printing_in_progress: { label: 'Printing in Progress', bg: '#e9f8ff', color: '#00628c', icon: 'print' },
+    ready_for_pickup: { label: 'Ready for Pickup', bg: '#e8f7ef', color: '#006947', icon: 'check_circle' },
+    distributed: { label: 'Distributed', bg: '#fff4d9', color: '#9a6700', icon: 'inventory_2' },
+  }
+
+  return statusMap[status] || statusMap.pending
+}
+
 function mapJobs(jobs) {
   return jobs.map((job) => {
     if (job.meta) return job
 
-    const statusMap = {
-      pending: { label: 'Pending', bg: '#eef2ff', color: '#4a40e0', icon: 'schedule' },
-      in_review: { label: 'In Review', bg: '#eef2ff', color: '#4a40e0', icon: 'picture_as_pdf' },
-      processing: { label: 'Processing', bg: '#e9f8ff', color: '#00628c', icon: 'print' },
-      completed: { label: 'Completed', bg: '#e8f7ef', color: '#006947', icon: 'check_circle' },
-      cancelled: { label: 'Cancelled', bg: '#fff1f4', color: '#b41340', icon: 'warning' },
-    }
-
-    const state = statusMap[job.status] || statusMap.pending
+    const normalizedStatus = getPrintStatus(job)
+    const state = getPrintStatusMeta(normalizedStatus)
     const isPrototype = String(job.id || '').startsWith('proto-order-')
 
     return {
       rawId: job.id,
-      originalStatus: job.status,
+      originalStatus: normalizedStatus,
       isRemote: !isPrototype,
       id: isPrototype ? `PROTO-${String(job.id).slice(-4).toUpperCase()}` : job.id.slice(0, 8).toUpperCase(),
       icon: state.icon,
@@ -138,9 +155,12 @@ function mapJobs(jobs) {
         { icon: 'layers', label: `${job.pages} pages` },
         { icon: 'inventory_2', label: `${job.quantity} set${job.quantity > 1 ? 's' : ''}` },
       ],
+      statusKey: normalizedStatus,
       status: state.label,
       statusBg: state.bg,
       statusColor: state.color,
+      collected: Boolean(job.collected),
+      collectedAt: job.collected_at || null,
     }
   })
 }
@@ -166,6 +186,7 @@ function AdminPage() {
   const [activeSection, setActiveSection] = useState('overview')
   const [showFilters, setShowFilters] = useState(false)
   const [jobFilter, setJobFilter] = useState('all')
+  const [isShopOpen, setIsShopOpen] = useState(() => getShopOpenStatus())
 
   const overviewRef = useRef(null)
   const servicesRef = useRef(null)
@@ -174,13 +195,17 @@ function AdminPage() {
 
   const mappedJobs = useMemo(() => mapJobs(jobs), [jobs])
   const openJobsCount = useMemo(
-    () => jobs.filter((job) => !['completed', 'cancelled'].includes((job.status || '').toLowerCase())).length,
-    [jobs]
+    () => mappedJobs.filter((job) => job.statusKey !== 'distributed').length,
+    [mappedJobs]
+  )
+  const pendingPickupCount = useMemo(
+    () => mappedJobs.filter((job) => job.statusKey === 'ready_for_pickup' && !job.collected).length,
+    [mappedJobs]
   )
 
   const filteredJobs = useMemo(() => {
     if (jobFilter === 'all') return mappedJobs
-    return mappedJobs.filter((job) => job.status.toLowerCase().replaceAll(' ', '_') === jobFilter)
+    return mappedJobs.filter((job) => job.statusKey === jobFilter)
   }, [jobFilter, mappedJobs])
 
   useEffect(() => {
@@ -281,6 +306,14 @@ function AdminPage() {
     setSelectedIcon('print')
     setEnabled(true)
     setShowNameError(false)
+  }
+  function handleShopStatusToggle() {
+    setIsShopOpen((current) => {
+      const nextValue = !current
+      saveShopOpenStatus(nextValue)
+      setPageError(nextValue ? 'Shop status updated: open.' : 'Shop status updated: closed.')
+      return nextValue
+    })
   }
 
   async function ensureServiceHasCloudId(service, overrides = {}) {
@@ -428,12 +461,7 @@ function AdminPage() {
     }
   }
 
-  async function handleJobStatusToggle(jobToUpdate) {
-    const statusOrder = ['pending', 'in_review', 'processing', 'completed']
-    const currentStatus = jobToUpdate.originalStatus || 'pending'
-    const currentIndex = statusOrder.indexOf(currentStatus)
-    const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
-
+  async function handleJobStatusToggle(jobToUpdate, nextStatus) {
     if (!jobToUpdate.isRemote) {
       const updated = updatePrototypeOrderStatus(jobToUpdate.rawId, nextStatus)
       const prototypeJobs = getPrototypeOrders()
@@ -444,19 +472,15 @@ function AdminPage() {
         todayJobs: prototypeStats.todayJobs,
         openAlerts: prototypeStats.openAlerts,
       }))
-      setPageError(
-        updated?.status === 'completed'
-          ? 'Student notified: the order is ready to take.'
-          : ''
-      )
+      setPageError(updated?.print_status === 'ready_for_pickup' ? 'Student notified: the order is ready to take.' : '')
       return
     }
 
     try {
-      await updateOrderStatus(jobToUpdate.rawId, nextStatus)
+      const updated = await updateOrderStatus(jobToUpdate.rawId, nextStatus)
       setJobs((current) =>
         current.map((job) =>
-          job.id === jobToUpdate.rawId ? { ...job, status: nextStatus } : job
+          job.id === jobToUpdate.rawId ? { ...job, ...updated } : job
         )
       )
       setPageError('')
@@ -471,12 +495,45 @@ function AdminPage() {
           todayJobs: prototypeStats.todayJobs,
           openAlerts: prototypeStats.openAlerts,
         }))
-        setPageError(
-          updated.status === 'completed'
-            ? 'Student notified: the order is ready to take.'
-            : 'Order updated in prototype mode.'
-        )
+        setPageError(updated.print_status === 'ready_for_pickup' ? 'Student notified: the order is ready to take.' : 'Order updated in prototype mode.')
       }
+    }
+  }
+
+  async function handleJobCollectedToggle(jobToUpdate, collected) {
+    if (!jobToUpdate.isRemote) {
+      updatePrototypeOrderCollected(jobToUpdate.rawId, collected)
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+      setJobs(prototypeJobs)
+      setStats((current) => ({
+        ...current,
+        todayJobs: prototypeStats.todayJobs,
+        openAlerts: prototypeStats.openAlerts,
+      }))
+      setPageError('')
+      return
+    }
+
+    try {
+      const updated = await updateOrderCollected(jobToUpdate.rawId, collected)
+      setJobs((current) =>
+        current.map((job) =>
+          job.id === jobToUpdate.rawId ? { ...job, ...updated } : job
+        )
+      )
+      setPageError('')
+    } catch {
+      updatePrototypeOrderCollected(jobToUpdate.rawId, collected)
+      const prototypeJobs = getPrototypeOrders()
+      const prototypeStats = getPrototypeStats()
+      setJobs(prototypeJobs)
+      setStats((current) => ({
+        ...current,
+        todayJobs: prototypeStats.todayJobs,
+        openAlerts: prototypeStats.openAlerts,
+      }))
+      setPageError('Collection updated in prototype mode.')
     }
   }
 
@@ -595,7 +652,7 @@ function AdminPage() {
   }
 
   function handleClearCompletedOrders() {
-    const completedCount = getPrototypeOrders().filter((order) => order.status === 'completed').length
+    const completedCount = getPrototypeOrders().filter((order) => order.print_status === 'distributed').length
 
     if (completedCount === 0) {
       setPageError('There are no completed prototype orders to clear right now.')
@@ -680,7 +737,16 @@ function AdminPage() {
                 <div className="admin-topbar-title">Operations Overview</div>
                 <div className="admin-topbar-sub">Monitor print requests, services, and system health.</div>
               </div>
-              <div className="admin-topbar-actions">
+              <div className="admin-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.9rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', padding: '0.65rem 0.9rem', borderRadius: '999px', background: '#ffffff', boxShadow: '0 10px 24px rgba(32,48,68,0.08)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>Shop</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: isShopOpen ? '#006947' : '#b41340' }}>
+                      {isShopOpen ? 'Open' : 'Closed'}
+                    </div>
+                  </div>
+                  <Toggle checked={isShopOpen} onChange={handleShopStatusToggle} />
+                </div>
                 <NotificationBell audience="admin" />
               </div>
             </div>
@@ -690,8 +756,8 @@ function AdminPage() {
             <div className="admin-main-inner">
               <section ref={overviewRef} className="admin-hero-grid">
                 <div className="admin-hero-main">
-                  <h2>Everything in the print room is moving on time.</h2>
-                  <p>Live status across services, queue activity, and supply health for the day shift.</p>
+                  <h2>{isShopOpen ? 'Everything in the print room is moving on time.' : 'The print room is currently closed.'}</h2>
+                  <p>{isShopOpen ? 'Live status across services, queue activity, and supply health for the day shift.' : 'Orders can still be monitored here while the shop is closed.'}</p>
                   <span className="material-symbols-outlined admin-hero-bg-icon">stacked_bar_chart</span>
                 </div>
                 <div className="admin-hero-stat">
@@ -710,6 +776,22 @@ function AdminPage() {
                     <div className="admin-stat-mini-val">{openJobsCount}</div>
                     <div className="admin-stat-mini-lbl">Open jobs</div>
                   </div>
+                </div>
+                <div className="admin-stat-mini">
+                  <div className="admin-stat-mini-icon" style={{ background: '#e8f7ef' }}>
+                    <span className="material-symbols-outlined" style={{ color: '#006947' }}>inventory_2</span>
+                  </div>
+                  <div>
+                    <div className="admin-stat-mini-val">{pendingPickupCount}</div>
+                    <div className="admin-stat-mini-lbl">Pending pickups</div>
+                  </div>
+                </div>
+                <div className="admin-stat-mini" style={{ alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                  <div>
+                    <div className="admin-stat-mini-val" style={{ fontSize: '1.1rem' }}>{isShopOpen ? 'Open' : 'Closed'}</div>
+                    <div className="admin-stat-mini-lbl">Shop status</div>
+                  </div>
+                  <Toggle checked={isShopOpen} onChange={handleShopStatusToggle} />
                 </div>
               </section>
 
@@ -811,9 +893,9 @@ function AdminPage() {
                     {[
                       ['all', 'All'],
                       ['pending', 'Pending'],
-                      ['in_review', 'In Review'],
-                      ['processing', 'Processing'],
-                      ['completed', 'Completed'],
+                      ['printing_in_progress', 'Printing in Progress'],
+                      ['ready_for_pickup', 'Ready for Pickup'],
+                      ['distributed', 'Distributed'],
                     ].map(([value, label]) => (
                       <button
                         key={value}
@@ -864,15 +946,25 @@ function AdminPage() {
                             </div>
                           </div>
                         </div>
-                        <button
-                          className="admin-status-badge"
-                          type="button"
-                          style={{ background: job.statusBg, color: job.statusColor }}
-                          onClick={() => handleJobStatusToggle(job)}
-                        >
-                          <span className="admin-badge-dot" style={{ background: job.statusColor }} />
-                          {job.status}
-                        </button>
+                        <div style={{ display: 'grid', gap: '0.75rem', justifyItems: 'end' }}>
+                          <div
+                            className="admin-status-badge"
+                            style={{ background: job.statusBg, color: job.statusColor }}
+                          >
+                            <span className="admin-badge-dot" style={{ background: job.statusColor }} />
+                            {job.status}
+                          </div>
+                          <div style={{ width: '100%', maxWidth: '260px' }}>
+                            <DeadlineReminder deadline={job.deadline} isPaid={job.collected} />
+                          </div>
+                          <OrderStatusManager
+                            status={job.statusKey}
+                            collected={job.collected}
+                            collectedAt={job.collectedAt}
+                            onStatusChange={(nextStatus) => handleJobStatusToggle(job, nextStatus)}
+                            onCollectedChange={(nextCollected) => handleJobCollectedToggle(job, nextCollected)}
+                          />
+                        </div>
                       </div>
                     ))
                   )}
@@ -1016,3 +1108,12 @@ function AdminPage() {
 }
 
 export default AdminPage
+
+
+
+
+
+
+
+
+

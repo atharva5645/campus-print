@@ -2,6 +2,8 @@
 import { ArrowLeft, FileText, ShoppingBag } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
+import DeadlineReminder from '../components/DeadlineReminder'
+import OrderStatusManager from '../components/OrderStatusManager'
 import CartSummary from '../components/CartSummary'
 import NotificationBell from '../components/NotificationBell'
 import { getCartItems } from '../api/cartApi'
@@ -13,25 +15,41 @@ import { supabase } from '../lib/supabase'
 import { generateCode } from '../utils/generateCode'
 
 function mapCartItemToOrder(cartItem) {
+  const uploadedFiles = Array.isArray(cartItem.uploadedFiles)
+    ? cartItem.uploadedFiles
+    : Array.isArray(cartItem.file_urls)
+    ? cartItem.file_urls.map((fileUrl, index) => ({
+        name: `Uploaded file ${index + 1}`,
+        publicUrl: fileUrl,
+      }))
+    : []
+
   return {
     id: cartItem.id,
+    uniqueCode: cartItem.uniqueCode || cartItem.code || '',
     serviceId: cartItem.service_id || cartItem.serviceId,
     serviceName: cartItem.services?.name || cartItem.serviceName || 'Printing Order',
-    pages: Number(cartItem.pages),
-    quantity: Number(cartItem.quantity),
-    pricePerPage: Number(cartItem.price_per_page ?? cartItem.pricePerPage),
-    totalPrice: Number(cartItem.total_price ?? cartItem.totalPrice),
+    pages: Number(cartItem.pages) || 0,
+    quantity: Number(cartItem.quantity) || 0,
+    pricePerPage: Number(cartItem.price_per_page ?? cartItem.pricePerPage) || 0,
+    totalPrice:
+      Number(cartItem.total_price ?? cartItem.totalPrice) ||
+      Number(cartItem.pages || 0) * Number(cartItem.quantity || 0) * Number(cartItem.price_per_page ?? cartItem.pricePerPage ?? 0),
     printMode: cartItem.printMode || 'color',
     printSides: cartItem.printSides || 'single',
     paperSize: cartItem.paperSize || 'A4',
     finishing: cartItem.finishing || 'none',
     finishingCharge: Number(cartItem.finishingCharge || 0),
-    uploadedFiles: Array.isArray(cartItem.uploadedFiles) ? cartItem.uploadedFiles : [],
+    uploadedFiles,
     isServiceDocument: Boolean(cartItem.isServiceDocument),
     documentTitle: cartItem.documentTitle || '',
     documentUrl: cartItem.documentUrl || '',
     linkedOrderId: cartItem.linkedOrderId || '',
     linkedOrderStatus: cartItem.linkedOrderStatus || '',
+    printStatus: cartItem.printStatus || cartItem.print_status || cartItem.status || 'pending',
+    deadline: cartItem.deadline || null,
+    collected: Boolean(cartItem.collected),
+    collectedAt: cartItem.collectedAt || cartItem.collected_at || null,
     orderCreatedFromCart: Boolean(cartItem.orderCreatedFromCart),
   }
 }
@@ -72,6 +90,14 @@ function getStudentLabel(user) {
   return 'CampusPrint Student'
 }
 
+function normalizeCartItems(items) {
+  if (!Array.isArray(items)) {
+    return []
+  }
+
+  return items.map(mapCartItemToOrder)
+}
+
 function CartPage() {
   const navigate = useNavigate()
   const [cartItems, setCartItems] = useState([])
@@ -91,23 +117,25 @@ function CartPage() {
         }
 
         setCurrentUser(data.user)
-        const remoteCartItems = await getCartItems(data.user.id)
+        const localCartItems = normalizeCartItems(getLocalCartItems())
+        const remoteCartItems = normalizeCartItems(await getCartItems(data.user.id))
 
-        if (remoteCartItems.length > 0) {
-          const mappedItems = remoteCartItems.map(mapCartItemToOrder)
-          setCartItems(mappedItems)
-          saveLocalCartItems(mappedItems)
+        if (localCartItems.length > 0) {
+          setCartItems(localCartItems)
+        } else if (remoteCartItems.length > 0) {
+          setCartItems(remoteCartItems)
+          saveLocalCartItems(remoteCartItems)
         } else {
-          setCartItems(getLocalCartItems())
+          setCartItems([])
         }
 
         setPageError('')
       } catch (error) {
-        const localCartItems = getLocalCartItems()
+        const localCartItems = normalizeCartItems(getLocalCartItems())
 
         if (localCartItems.length > 0) {
           setCartItems(localCartItems)
-          setPageError('Using saved cart items because the backend is offline right now.')
+          setPageError('Using saved cart items right now.')
           return
         }
 
@@ -368,6 +396,22 @@ function CartPage() {
                                   </p>
                                 </>
                               )}
+                              {item.uniqueCode && (
+                                <div className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold tracking-[0.16em] text-primary">
+                                  Code: {item.uniqueCode}
+                                </div>
+                              )}
+                              {item.linkedOrderId && (
+                                <div className="mt-3 space-y-3">
+                                  <DeadlineReminder deadline={item.deadline} isPaid={Boolean(item.collected)} />
+                                  <OrderStatusManager
+                                    readOnly
+                                    status={item.printStatus}
+                                    collected={Boolean(item.collected)}
+                                    collectedAt={item.collectedAt}
+                                  />
+                                </div>
+                              )}
                               {item.uploadedFiles?.length > 0 && (
                                 <div className="mt-3 rounded-2xl bg-surface-container px-3 py-3">
                                   <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-on-surface-variant">
@@ -447,11 +491,17 @@ function CartPage() {
                   itemCount > 0
                     ? cartItems[0].isServiceDocument
                       ? [
+                          ...(cartItems[0].uniqueCode
+                            ? [{ label: 'Unique Code', value: cartItems[0].uniqueCode }]
+                            : []),
                           { label: 'Item Type', value: 'Uploaded Service File' },
                           { label: 'Documents', value: `${itemCount}` },
                           { label: 'Access', value: 'Added from service list' },
                         ]
                       : [
+                          ...(cartItems[0].uniqueCode
+                            ? [{ label: 'Unique Code', value: cartItems[0].uniqueCode }]
+                            : []),
                           { label: 'Print Type', value: cartItems[0].printMode === 'bw' ? 'Black & White' : 'Color' },
                           { label: 'Sides', value: cartItems[0].printSides === 'double' ? 'Double-sided' : 'Single-sided' },
                           { label: 'Paper Size', value: cartItems[0].paperSize },
@@ -475,4 +525,7 @@ function CartPage() {
 }
 
 export default CartPage
+
+
+
 

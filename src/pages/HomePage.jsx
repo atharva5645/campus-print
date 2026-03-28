@@ -1,14 +1,19 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getServices } from '../api/adminApi'
+import { getOrders } from '../api/orderApi'
 import BottomNav from '../components/BottomNav'
+import DeadlineReminder from '../components/DeadlineReminder'
+import OrderStatusManager from '../components/OrderStatusManager'
 import NotificationBell from '../components/NotificationBell'
 import ServiceDocumentsSheet from '../components/ServiceDocumentsSheet'
 import { addLocalCartItem } from '../lib/localCart'
 import { getLocalServices, getStudentSafeServices, syncLocalServices } from '../lib/localServices'
+import { getPrototypeOrders } from '../lib/prototypeData'
 import { getStudentProfile } from '../lib/studentProfile'
 import { supabase } from '../lib/supabase'
+import { generateCode } from '../utils/generateCode'
 
 function getGreeting() {
   const hour = new Date().getHours()
@@ -100,6 +105,14 @@ function normalizeServiceShape(service) {
   }
 }
 
+function getPrintStatus(order) {
+  const legacyMap = {
+    processing: 'printing_in_progress',
+    completed: 'ready_for_pickup',
+  }
+
+  return order.print_status || legacyMap[order.status] || order.status || 'pending'
+}
 function mergeServices(...serviceLists) {
   const serviceMap = new Map()
 
@@ -110,7 +123,7 @@ function mergeServices(...serviceLists) {
       const normalizedService = normalizeServiceShape(service)
       const nameKey = String(normalizedService.name || '').trim().toLowerCase()
       const idKey = normalizedService.id ? String(normalizedService.id) : ''
-      const key = idKey || nameKey
+      const key = nameKey || idKey
 
       if (!key) return
 
@@ -121,10 +134,22 @@ function mergeServices(...serviceLists) {
         return
       }
 
+      // Priority to retain id from real backend over local- mock id
+      const mergedId = (existingService.id && !String(existingService.id).startsWith('local-')) 
+        ? existingService.id 
+        : (normalizedService.id && !String(normalizedService.id).startsWith('local-'))
+          ? normalizedService.id
+          : existingService.id || normalizedService.id
+
+      const isRemoteActive = serviceLists.length > 1
+
       serviceMap.set(key, {
         ...existingService,
         ...normalizedService,
-        enabled: Boolean(existingService.enabled || normalizedService.enabled),
+        id: mergedId,
+        enabled: isRemoteActive && normalizedService !== undefined
+          ? Boolean(normalizedService.enabled)
+          : Boolean(existingService.enabled || normalizedService.enabled),
       })
     })
 
@@ -140,6 +165,7 @@ function HomePage() {
   const [pageError, setPageError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [currentUser, setCurrentUser] = useState(null)
+  const [studentOrders, setStudentOrders] = useState([])
   const [studentProfile, setStudentProfile] = useState(() => getStudentProfile())
   const [featuredQuote] = useState(() => getRotatingStudyQuote())
 
@@ -190,6 +216,20 @@ function HomePage() {
     }
   }
 
+  async function loadStudentOrders(userId) {
+    if (!userId) {
+      setStudentOrders([])
+      return
+    }
+
+    try {
+      const remoteOrders = await getOrders(userId)
+      setStudentOrders(remoteOrders || [])
+    } catch {
+      setStudentOrders(getPrototypeOrders().filter((order) => order.user_id === userId))
+    }
+  }
+
   async function loadDocuments(serviceData) {
     const validServiceIds = (serviceData || [])
       .map((service) => service.id)
@@ -236,6 +276,7 @@ function HomePage() {
   function handleAddDocumentToCart(service, document) {
     addLocalCartItem({
       id: `service-document-${document.id}-${Date.now()}`,
+      uniqueCode: generateCode(),
       serviceId: service.id,
       serviceName: `${service.name} - ${document.title}`,
       pages: 1,
@@ -292,6 +333,18 @@ function HomePage() {
     loadDocuments(services)
   }, [services])
 
+  useEffect(() => {
+    loadStudentOrders(currentUser?.id)
+
+    const intervalId = window.setInterval(() => {
+      loadStudentOrders(currentUser?.id)
+    }, 5000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [currentUser?.id])
+
   const visibleServices = useMemo(() => {
     const enabledServices = services.filter((service) => service.enabled)
     const query = searchQuery.trim().toLowerCase()
@@ -300,6 +353,16 @@ function HomePage() {
 
     return enabledServices.filter((service) => getServiceSearchTerms(service).includes(query))
   }, [services, searchQuery])
+
+  const pendingPickups = useMemo(
+    () => studentOrders.filter((order) => getPrintStatus(order) === 'ready_for_pickup' && !order.collected),
+    [studentOrders]
+  )
+
+  const recentOrders = useMemo(
+    () => studentOrders.slice(0, 3),
+    [studentOrders]
+  )
 
   return (
     <div className="bg-surface font-body text-on-surface min-h-screen pb-32">
@@ -475,20 +538,56 @@ function HomePage() {
         </section>
 
         <section className="pb-10 animate-fade-in-up" style={{ animationDelay: '240ms' }}>
-          <div className="rounded-2xl p-6 flex items-center gap-6 bg-surface-container-low">
-            <div className="flex-1 space-y-1">
-              <h4 className="text-lg font-bold text-on-surface font-headline">
-                Current Status
-              </h4>
-              <p className="text-xs text-on-surface-variant">
-                You have 2 pending orders ready for pickup at the Main Library Hub.
-              </p>
+          <div className="rounded-2xl bg-surface-container-low p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex-1 space-y-1">
+                <h4 className="text-lg font-bold text-on-surface font-headline">
+                  Current Status
+                </h4>
+                <p className="text-xs text-on-surface-variant">
+                  {pendingPickups.length > 0
+                    ? `You have ${pendingPickups.length} pending pickup${pendingPickups.length > 1 ? 's' : ''} ready at the print room.`
+                    : 'Your latest orders and deadlines will appear here.'}
+                </p>
+              </div>
+              <div className="rounded-full bg-primary/10 px-4 py-3 text-center text-primary">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em]">Pending Pickups</p>
+                <p className="mt-1 text-2xl font-bold">{pendingPickups.length}</p>
+              </div>
             </div>
-            <div
-              className="w-14 h-14 rounded-full flex items-center justify-center animate-[pulseGlow_2s_ease-in-out_infinite]"
-              style={{ border: '4px solid var(--clr-primary)', borderTopColor: 'transparent' }}
-            >
-              <span className="text-[10px] font-bold text-primary">85%</span>
+
+            <div className="mt-5 space-y-3">
+              {recentOrders.length === 0 ? (
+                <div className="rounded-2xl bg-surface-container-lowest px-4 py-4 text-sm text-on-surface-variant">
+                  No orders yet. Create one from Custom Order or a service file.
+                </div>
+              ) : (
+                recentOrders.map((order) => (
+                  <div key={order.id} className="rounded-2xl bg-surface-container-lowest p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-3">
+                        <div>
+                          <p className="font-headline text-base font-bold text-on-surface">
+                            {order.services?.name || order.service_name || 'Printing Order'}
+                          </p>
+                          <p className="text-xs text-on-surface-variant">
+                            {order.quantity} qty x {order.pages} pages
+                          </p>
+                        </div>
+                        <DeadlineReminder deadline={order.deadline} isPaid={Boolean(order.collected)} />
+                      </div>
+                      <div className="min-w-[220px]">
+                        <OrderStatusManager
+                          readOnly
+                          status={getPrintStatus(order)}
+                          collected={Boolean(order.collected)}
+                          collectedAt={order.collected_at}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </section>
@@ -511,3 +610,6 @@ function HomePage() {
 }
 
 export default HomePage
+
+
+

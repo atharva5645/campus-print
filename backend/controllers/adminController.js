@@ -1,4 +1,4 @@
-import supabase from '../config/supabaseClient.js'
+﻿import supabase from '../config/supabaseClient.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { createHttpError } from '../utils/httpError.js'
 
@@ -24,7 +24,10 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
 export const getRecentJobs = asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('*')
+    .select(`
+      *,
+      services(name, icon)
+    `)
     .order('created_at', { ascending: false })
     .limit(10)
 
@@ -32,3 +35,4 @@ export const getRecentJobs = asyncHandler(async (req, res) => {
 
   res.json(data)
 })
+

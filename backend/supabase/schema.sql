@@ -1,4 +1,4 @@
-create extension if not exists "pgcrypto";
+﻿create extension if not exists "pgcrypto";
 
 create table if not exists public.profiles (
   id uuid primary key,
@@ -31,9 +31,18 @@ create table if not exists public.orders (
   notes text,
   file_urls text[] not null default '{}',
   status text not null default 'pending' check (status in ('pending', 'in_review', 'processing', 'completed', 'cancelled')),
+  deadline timestamptz,
+  print_status text not null default 'pending' check (print_status in ('pending', 'printing_in_progress', 'ready_for_pickup', 'distributed')),
+  collected boolean not null default false,
+  collected_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.orders add column if not exists deadline timestamptz;
+alter table public.orders add column if not exists print_status text not null default 'pending';
+alter table public.orders add column if not exists collected boolean not null default false;
+alter table public.orders add column if not exists collected_at timestamptz;
 
 create table if not exists public.cart_items (
   id uuid primary key default gen_random_uuid(),
@@ -153,3 +162,5 @@ create table if not exists public.documents (
 
 create index if not exists documents_service_id_idx on public.documents(service_id);
 create index if not exists documents_created_at_idx on public.documents(created_at desc);
+
+
