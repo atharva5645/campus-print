@@ -22,6 +22,7 @@ export async function uploadDocument({ serviceId, title, file }) {
     const response = await fetch(`${API_BASE_URL}/api/documents`, {
       method: 'POST',
       body: formData,
+      credentials: 'include',
     })
 
     if (!response.ok) {
@@ -46,5 +47,6 @@ export async function uploadDocument({ serviceId, title, file }) {
 export function deleteDocument(id) {
   return apiFetch(`/api/documents/${id}`, {
     method: 'DELETE',
+    credentials: 'include',
   })
 }

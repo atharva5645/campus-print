@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
 import { listPrototypeNotifications, markPrototypeNotificationsRead } from '../lib/prototypeData'
 
-export async function getNotifications({ audience, userId, limit = 8 }) {
+export async function getNotifications({ audience, userId, limit = 8, unreadOnly = false }) {
   const params = new URLSearchParams({
     audience,
     limit: String(limit),
@@ -9,6 +9,9 @@ export async function getNotifications({ audience, userId, limit = 8 }) {
 
   if (userId) {
     params.set('user_id', userId)
+  }
+  if (unreadOnly) {
+    params.set('unreadOnly', 'true')
   }
 
   try {

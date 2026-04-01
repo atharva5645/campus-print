@@ -2,7 +2,7 @@ import supabase from '../config/supabaseClient.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { createHttpError } from '../utils/httpError.js'
 
-const DOCUMENTS_BUCKET = process.env.SUPABASE_DOCUMENTS_BUCKET || 'documents'
+const DOCUMENTS_BUCKET = process.env.SUPABASE_DOCUMENTS_BUCKET || process.env.SUPABASE_STORAGE_BUCKET || 'documents'
 
 function buildStoragePath(serviceId, fileName) {
   const safeName = String(fileName || 'document')
@@ -77,7 +77,7 @@ export const uploadDocument = asyncHandler(async (req, res) => {
       file_url: publicUrlData.publicUrl,
     })
     .select('id, service_id, title, file_url, created_at')
-    .single()
+    .maybeSingle()
 
   if (insertError) {
     await supabase.storage.from(DOCUMENTS_BUCKET).remove([storagePath])
@@ -125,3 +125,6 @@ export const deleteDocument = asyncHandler(async (req, res) => {
 
   res.status(204).send()
 })
+
+
+

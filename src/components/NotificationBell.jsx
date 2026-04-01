@@ -21,6 +21,7 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
   const [notifications, setNotifications] = useState([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
   const isStudent = audience === 'student'
@@ -32,8 +33,8 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
 
     try {
       setIsLoading(true)
-      const items = await getNotifications({ audience, userId, limit: 8 })
-      setNotifications(items)
+      const items = await getNotifications({ audience, userId, limit: 8, unreadOnly: true })
+      setNotifications((items || []).filter((item) => !item.is_read))
       setErrorMessage('')
     } catch {
       setErrorMessage('Notifications are temporarily unavailable.')
@@ -51,6 +52,11 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
       loadNotifications()
     }, 3000)
 
+    const handleRefreshEvent = () => {
+      loadNotifications()
+    }
+
+    window.addEventListener('campus_print_notifications_refresh', handleRefreshEvent)
     const handleStorage = () => {
       loadNotifications()
     }
@@ -59,6 +65,7 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
 
     return () => {
       window.clearInterval(intervalId)
+      window.removeEventListener('campus_print_notifications_refresh', handleRefreshEvent)
       window.removeEventListener('storage', handleStorage)
     }
   }, [audience, userId])
@@ -71,19 +78,26 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
   async function handleToggle() {
     const nextOpen = !isOpen
     setIsOpen(nextOpen)
+  }
 
-    if (!nextOpen || unreadCount === 0 || !canLoad) {
-      return
-    }
+  async function handleClearAll() {
+    if (!canLoad || notifications.length === 0) return
 
-    setNotifications((current) => current.map((item) => ({ ...item, is_read: true })))
+    setIsClearing(true)
+    setErrorMessage('')
+
+    // Optimistic UI: clear immediately
+    const previous = notifications
+    setNotifications([])
 
     try {
       await markNotificationsRead({ audience, userId })
-      setErrorMessage('')
     } catch {
-      setErrorMessage('Notifications are temporarily unavailable.')
-      loadNotifications()
+      // Restore if failed
+      setNotifications(previous)
+      setErrorMessage('Could not clear notifications right now.')
+    } finally {
+      setIsClearing(false)
     }
   }
 
@@ -125,7 +139,17 @@ function NotificationBell({ audience = 'student', userId, variant = 'light' }) {
                 {audience === 'admin' ? 'Admin updates' : 'Your orders'}
               </h3>
             </div>
-            <span className={badgeClassName}>{notifications.length}</span>
+            <div className="flex items-center gap-2">
+              <span className={badgeClassName}>{notifications.length}</span>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                disabled={notifications.length === 0 || isClearing}
+                className={`text-xs font-semibold ${isDarkVariant ? 'text-white/80 hover:text-white' : 'text-primary hover:text-primary/80'} disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {isClearing ? 'Clearing…' : 'Clear'}
+              </button>
+            </div>
           </div>
 
           <div className="max-h-80 overflow-y-auto px-4 py-3">

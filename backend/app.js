@@ -3,15 +3,18 @@ import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import cookieParser from 'cookie-parser'
 import adminRoutes from './routes/adminRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import cartRoutes from './routes/cartRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
 import notificationRoutes from './routes/notificationRoutes.js'
+import adminAuthRoutes from './routes/adminAuthRoutes.js'
 import orderRoutes from './routes/orderRoutes.js'
 import serviceRoutes from './routes/serviceRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js'
 import { errorHandler, notFoundHandler } from './middleware/errorMiddleware.js'
+import { requireAdmin } from './middleware/adminAuthMiddleware.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(currentDir, '.env') })
@@ -55,6 +58,7 @@ app.use(
     credentials: true,
   })
 )
+app.use(cookieParser())
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
@@ -75,12 +79,13 @@ app.get('/api/health', (req, res) => {
   })
 })
 
+app.use('/api/admin-auth', adminAuthRoutes)
+app.use('/api/admin', requireAdmin, adminRoutes)
 app.use('/api/services', serviceRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/cart', cartRoutes)
 app.use('/api/documents', documentRoutes)
 app.use('/api/notifications', notificationRoutes)
-app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/uploads', uploadRoutes)
 

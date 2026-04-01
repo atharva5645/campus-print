@@ -244,6 +244,8 @@ function CartPage() {
           : 'Order created successfully. Check the bell icon for your latest order update.'
       )
       setPageError('')
+      // Let any NotificationBell listeners refresh immediately after checkout
+      window.dispatchEvent(new Event('campus_print_notifications_refresh'))
 
       const uploadedFileNames = cartItems
         .flatMap((item) => item.uploadedFiles || [])

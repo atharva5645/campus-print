@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { adminLogin } from '../api/adminAuthApi'
 
 function ModeSelectorPage() {
   const navigate = useNavigate()
@@ -8,6 +9,11 @@ function ModeSelectorPage() {
     if (saved) return saved === 'dark'
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
+  const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const [adminEmail, setAdminEmail] = useState('jcerprint@gmail.com')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [adminLoading, setAdminLoading] = useState(false)
 
   useEffect(() => {
     const html = document.documentElement
@@ -20,6 +26,21 @@ function ModeSelectorPage() {
     }
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
+
+  async function handleAdminLogin(event) {
+    event?.preventDefault()
+    setAdminLoading(true)
+    setAdminError('')
+    try {
+      await adminLogin(adminEmail, adminPassword)
+      localStorage.setItem('adminAuthed', 'true')
+      navigate('/admin')
+    } catch (error) {
+      setAdminError(error.message || 'Invalid credentials')
+    } finally {
+      setAdminLoading(false)
+    }
+  }
 
   return (
     <div className="bg-surface text-on-surface min-h-screen flex flex-col items-center justify-center p-6">
@@ -114,7 +135,7 @@ function ModeSelectorPage() {
 
           {/* Admin Mode Card */}
           <button
-            onClick={() => navigate('/admin')}
+            onClick={() => setShowAdminLogin(true)}
             className="card-secondary group relative flex flex-col items-center text-center p-10 shadow-[0_20px_48px_rgba(0,98,140,0.2)] transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 active:scale-95 text-white overflow-hidden cursor-pointer"
             style={{ borderRadius: '3rem' }}
           >
@@ -164,6 +185,74 @@ function ModeSelectorPage() {
         <div className="blob-primary absolute top-[10%] left-[5%] w-96 h-96 rounded-full blur-[120px] opacity-60 dark:opacity-30" />
         <div className="blob-secondary absolute bottom-[10%] right-[5%] w-[30rem] h-[30rem] rounded-full blur-[150px] opacity-50 dark:opacity-20" />
       </div>
+
+      {showAdminLogin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-8 shadow-2xl text-on-surface">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-on-surface-variant">Admin Login</p>
+                <h3 className="text-2xl font-headline font-bold mt-1">CampusPrint Admin</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminLogin(false)
+                  setAdminError('')
+                  setAdminPassword('')
+                }}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-on-surface shadow hover:bg-surface-container-high"
+                aria-label="Close admin login"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={handleAdminLogin}>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-on-surface" htmlFor="admin-email">
+                  Admin Email
+                </label>
+                <input
+                  id="admin-email"
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="w-full rounded-2xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 text-on-surface outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+                  required
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-on-surface" htmlFor="admin-password">
+                  Password
+                </label>
+                <input
+                  id="admin-password"
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="w-full rounded-2xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 text-on-surface outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+                  required
+                />
+              </div>
+
+              {adminError && (
+                <div className="rounded-xl bg-error-container/20 px-4 py-3 text-sm text-error">
+                  {adminError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={adminLoading}
+                className="w-full rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(74,64,224,0.25)] transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {adminLoading ? 'Signing in…' : 'Login as Admin'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

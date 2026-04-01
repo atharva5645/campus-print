@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './AdminPage.css'
+import { getAdminSession } from '../api/adminAuthApi'
 import {
   createService,
   deleteService,
@@ -34,7 +35,39 @@ const fallbackStats = {
 
 const iconOptions = ['print', 'description', 'menu_book', 'science', 'inventory_2']
 
-function Toggle({ checked, onChange }) {
+function Toggle({ checked, onChange, variant = 'default' }) {
+  if (variant === 'pill') {
+    const trackStyle = {
+      width: '42px',
+      height: '22px',
+      borderRadius: '999px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '3px',
+      background: checked ? 'var(--clr-primary, #6f63ff)' : '#cbd5e1',
+      boxShadow: '0 6px 14px rgba(0,0,0,0.12)',
+      transition: 'background 180ms ease, box-shadow 180ms ease',
+      cursor: 'pointer',
+    }
+
+    const knobStyle = {
+      width: '16px',
+      height: '16px',
+      borderRadius: '50%',
+      background: '#fff',
+      transform: checked ? 'translateX(18px)' : 'translateX(0)',
+      transition: 'transform 180ms ease',
+      boxShadow: '0 4px 10px rgba(0,0,0,0.18)',
+    }
+
+    return (
+      <label style={trackStyle}>
+        <input checked={checked} type="checkbox" onChange={onChange} style={{ display: 'none' }} />
+        <span style={knobStyle} />
+      </label>
+    )
+  }
+
   return (
     <label className="admin-toggle">
       <input checked={checked} type="checkbox" onChange={onChange} />
@@ -187,6 +220,7 @@ function AdminPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [jobFilter, setJobFilter] = useState('all')
   const [isShopOpen, setIsShopOpen] = useState(() => getShopOpenStatus())
+  const [authChecked, setAuthChecked] = useState(false)
 
   const overviewRef = useRef(null)
   const servicesRef = useRef(null)
@@ -209,6 +243,17 @@ function AdminPage() {
   }, [jobFilter, mappedJobs])
 
   useEffect(() => {
+    // Guard: ensure admin session exists before loading data
+    getAdminSession()
+      .then(() => setAuthChecked(true))
+      .catch(() => {
+        navigate('/')
+      })
+  }, [navigate])
+
+  useEffect(() => {
+    if (!authChecked) return
+
     function loadPrototypeState() {
       const prototypeJobs = getPrototypeOrders()
       const prototypeStats = getPrototypeStats()
@@ -250,7 +295,8 @@ function AdminPage() {
           openAlerts: prototypeStats.openAlerts,
         })
         setJobs(prototypeJobs)
-        setPageError('Prototype mode is active. New student orders will appear here even while the backend is offline.')
+        // Stay silent instead of showing the prototype warning banner to admins.
+        setPageError('')
       }
     }
 
@@ -274,7 +320,7 @@ function AdminPage() {
       window.clearInterval(intervalId)
       window.removeEventListener('storage', handleStorage)
     }
-  }, [])
+  }, [authChecked])
 
   function persistServices(nextServices) {
     setServices(nextServices)
@@ -393,11 +439,6 @@ function AdminPage() {
     }
 
     setActiveSection(section)
-    if (section === 'settings') {
-      navigate('/settings')
-      return
-    }
-
     map[section]?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -702,10 +743,6 @@ function AdminPage() {
               <span className="material-symbols-outlined">inventory_2</span>
               Inventory
             </button>
-            <button className={`admin-nav-item${activeSection === 'settings' ? ' active' : ''}`} type="button" onClick={() => scrollToSection('settings')}>
-              <span className="material-symbols-outlined">settings</span>
-              Settings
-            </button>
           </nav>
 
           <div className="admin-sidebar-footer">
@@ -745,7 +782,7 @@ function AdminPage() {
                       {isShopOpen ? 'Open' : 'Closed'}
                     </div>
                   </div>
-                  <Toggle checked={isShopOpen} onChange={handleShopStatusToggle} />
+                  <Toggle checked={isShopOpen} onChange={handleShopStatusToggle} variant="pill" />
                 </div>
                 <NotificationBell audience="admin" />
               </div>
@@ -791,7 +828,6 @@ function AdminPage() {
                     <div className="admin-stat-mini-val" style={{ fontSize: '1.1rem' }}>{isShopOpen ? 'Open' : 'Closed'}</div>
                     <div className="admin-stat-mini-lbl">Shop status</div>
                   </div>
-                  <Toggle checked={isShopOpen} onChange={handleShopStatusToggle} />
                 </div>
               </section>
 
@@ -979,9 +1015,6 @@ function AdminPage() {
                   </div>
                   <div className="admin-progress-labels">
                     <span>72% stock available</span>
-                    <button type="button" className="admin-inline-link" onClick={() => scrollToSection('settings')}>
-                      Reorder soon
-                    </button>
                   </div>
                   <span className="material-symbols-outlined admin-bento-bg-icon">inventory</span>
                 </div>
@@ -1017,10 +1050,6 @@ function AdminPage() {
         <button className={`admin-bnav-item${activeSection === 'inventory' ? ' active' : ''}`} type="button" onClick={() => scrollToSection('inventory')}>
           <span className="material-symbols-outlined">inventory_2</span>
           Stock
-        </button>
-        <button className={`admin-bnav-item${activeSection === 'settings' ? ' active' : ''}`} type="button" onClick={() => scrollToSection('settings')}>
-          <span className="material-symbols-outlined">person</span>
-          Profile
         </button>
       </nav>
 
