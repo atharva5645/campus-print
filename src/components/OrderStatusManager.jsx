@@ -1,4 +1,4 @@
-﻿import React from 'react'
+import React from 'react'
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
@@ -39,18 +39,11 @@ function OrderStatusManager({
   }
 
   return (
-    <div style={{ display: 'grid', gap: '0.6rem', minWidth: '230px' }}>
+    <div className="flex flex-col gap-2.5 min-w-[230px]">
       <select
         value={status}
         onChange={(event) => onStatusChange?.(event.target.value)}
-        style={{
-          borderRadius: '999px',
-          padding: '0.75rem 1rem',
-          border: '1px solid rgba(148, 163, 184, 0.35)',
-          background: '#fff',
-          color: '#162033',
-          fontWeight: 600,
-        }}
+        className="w-full rounded-full border border-outline-variant bg-surface px-4 py-3 font-semibold text-on-surface transition-all hover:bg-surface-container focus:outline-none focus:ring-2 focus:ring-primary active:scale-[0.98]"
       >
         {STATUS_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
@@ -58,15 +51,16 @@ function OrderStatusManager({
           </option>
         ))}
       </select>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontSize: '0.92rem', color: '#526076' }}>
+      <label className="flex cursor-pointer items-center gap-2 text-[0.92rem] text-on-surface-variant">
         <input
           type="checkbox"
           checked={collected}
           onChange={(event) => onCollectedChange?.(event.target.checked)}
+          className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary bg-surface transition-colors accent-primary"
         />
         Mark collected
       </label>
-      <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>{formatTimestamp(collectedAt)}</div>
+      <div className="text-[0.82rem] text-on-surface-variant/80">{formatTimestamp(collectedAt)}</div>
     </div>
   )
 }
